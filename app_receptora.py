@@ -3371,100 +3371,119 @@ class PanelAdminIT:
         """Muestra el diálogo para editar un equipo."""
         import traceback
         try:
-            print(f">>> DIALOGO EDITAR EQUIPO: {mac_address} <<<")
             equipo = self.gestor.obtener_equipo_por_mac(mac_address)
-            print(f">>> EQUIPO OBTENIDO: {equipo} <<<")
             if not equipo:
-                self._mostrar_snackbar("❌ Equipo no encontrado", COLOR_ERROR)
+                self._mostrar_error("Equipo no encontrado", "No se encontró el equipo en el inventario.")
                 return
             
-            # Campos del formulario
-            print(">>> CREANDO CAMPOS <<<")
+            # Campos del formulario con estilo mejorado
             txt_nombre = ft.TextField(
                 label="Nombre del Equipo",
                 value=equipo.get("NOMBRE_EQUIPO", ""),
-                width=400,
-                hint_text="Ej: PC-CONTABILIDAD-01"
+                width=380,
+                hint_text="Ej: PC-CONTABILIDAD-01",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_ubicacion = ft.TextField(
                 label="Ubicación",
                 value=equipo.get("UBICACION", ""),
-                width=400,
-                hint_text="Ej: Oficina 201, Piso 2"
+                width=380,
+                hint_text="Ej: Oficina 201, Piso 2",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_marca = ft.TextField(
                 label="Marca",
                 value=equipo.get("MARCA", ""),
-                width=195,
-                hint_text="Ej: Dell, HP, Lenovo"
+                width=185,
+                hint_text="Ej: Dell, HP",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_modelo = ft.TextField(
                 label="Modelo",
                 value=equipo.get("MODELO", ""),
-                width=195,
-                hint_text="Ej: OptiPlex 7090"
+                width=185,
+                hint_text="Ej: OptiPlex 7090",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_serie = ft.TextField(
                 label="Número de Serie",
                 value=equipo.get("NUMERO_SERIE", ""),
-                width=400
+                width=380,
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             dd_grupo = ft.Dropdown(
                 label="Grupo/Departamento",
                 value=equipo.get("GRUPO", "Sin Asignar"),
-                width=195,
+                width=185,
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO,
                 options=[ft.dropdown.Option(g) for g in GRUPOS_EQUIPOS]
             )
             dd_tipo = ft.Dropdown(
                 label="Tipo de Equipo",
                 value=equipo.get("TIPO_EQUIPO", "Desktop"),
-                width=195,
+                width=185,
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO,
                 options=[ft.dropdown.Option(t) for t in TIPOS_EQUIPO]
             )
             dd_estado = ft.Dropdown(
                 label="Estado",
                 value=equipo.get("ESTADO_EQUIPO", "Activo"),
-                width=195,
+                width=185,
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO,
                 options=[ft.dropdown.Option(e) for e in ESTADOS_EQUIPO]
             )
             txt_so = ft.TextField(
                 label="Sistema Operativo",
                 value=equipo.get("SISTEMA_OPERATIVO", ""),
-                width=195,
-                hint_text="Ej: Windows 11 Pro"
+                width=185,
+                hint_text="Ej: Windows 11 Pro",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_procesador = ft.TextField(
                 label="Procesador",
                 value=equipo.get("PROCESADOR", ""),
-                width=400,
-                hint_text="Ej: Intel Core i7-12700"
+                width=380,
+                hint_text="Ej: Intel Core i7-12700",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_ram = ft.TextField(
                 label="RAM (GB)",
                 value=str(equipo.get("RAM_GB", 0)) if equipo.get("RAM_GB", 0) > 0 else "",
-                width=95,
-                hint_text="16"
+                width=90,
+                hint_text="16",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_disco = ft.TextField(
                 label="Disco (GB)",
                 value=str(equipo.get("DISCO_GB", 0)) if equipo.get("DISCO_GB", 0) > 0 else "",
-                width=95,
-                hint_text="512"
+                width=90,
+                hint_text="512",
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             txt_notas = ft.TextField(
                 label="Notas adicionales",
                 value=equipo.get("NOTAS", ""),
-                width=400,
+                width=380,
                 multiline=True,
                 min_lines=2,
-                max_lines=4
+                max_lines=3,
+                border_color=COLOR_BORDE,
+                focused_border_color=COLOR_PRIMARIO
             )
             
-            def cerrar_dialogo(e=None):
-                self.page.pop_dialog()
-            
             def guardar_equipo(e=None):
-                print(">>> GUARDAR EQUIPO EJECUTADO <<<")
                 try:
                     # Convertir valores numéricos de forma segura
                     ram_value = 0
@@ -3479,6 +3498,9 @@ class PanelAdminIT:
                             disco_value = int(txt_disco.value)
                         except ValueError:
                             disco_value = 0
+                    
+                    self._cerrar_dialogo(None)
+                    self._mostrar_carga("Guardando cambios...")
                     
                     self.gestor.actualizar_equipo(
                         mac_address,
@@ -3496,102 +3518,156 @@ class PanelAdminIT:
                         disco_gb=disco_value,
                         notas=txt_notas.value or ""
                     )
-                    self._mostrar_snackbar("✅ Equipo actualizado correctamente", COLOR_EXITO)
-                    self.page.pop_dialog()
+                    
+                    self._ocultar_carga()
+                    self._mostrar_exito("Equipo Actualizado", "Los cambios se guardaron correctamente.")
                     self._refrescar_inventario()
                 except Exception as ex:
-                    print(f">>> ERROR AL GUARDAR: {ex} <<<")
+                    self._ocultar_carga()
+                    self._mostrar_error("Error al guardar", str(ex))
                     traceback.print_exc()
-                    self._mostrar_snackbar(f"❌ Error: {str(ex)}", COLOR_ERROR)
             
-            print(">>> CREANDO DIALOGO <<<")
             dlg = AlertDialog(
                 modal=True,
-                title=Text(f"📝 Editar Equipo: {mac_address}", weight=FontWeight.BOLD),
+                shape=RoundedRectangleBorder(radius=16),
+                bgcolor=COLOR_SUPERFICIE,
+                title=Row([
+                    Container(
+                        content=Icon(icons.EDIT, size=24, color=colors.WHITE),
+                        bgcolor=COLOR_PRIMARIO,
+                        padding=8,
+                        border_radius=8
+                    ),
+                    Column([
+                        Text("Editar Equipo", weight=FontWeight.BOLD, color=COLOR_TEXTO, size=16),
+                        Text(mac_address, size=11, color=COLOR_TEXTO_SEC)
+                    ], spacing=0)
+                ], spacing=12),
                 content=Container(
                     content=Column([
+                        # Info básica del equipo
+                        Container(
+                            content=Row([
+                                Icon(icons.COMPUTER, size=18, color=COLOR_ACENTO),
+                                Text(f"Hostname: {equipo.get('HOSTNAME', 'N/A')}", color=COLOR_TEXTO_SEC, size=12),
+                                Text("|", color=COLOR_BORDE),
+                                Text(f"Usuario: {equipo.get('USUARIO_ASIGNADO', 'N/A')}", color=COLOR_TEXTO_SEC, size=12),
+                            ], spacing=10),
+                            bgcolor=COLOR_SUPERFICIE_2,
+                            padding=10,
+                            border_radius=8
+                        ),
+                        
+                        # Sección Información General
                         Row([
-                            Icon(icons.COMPUTER, color=COLOR_ACENTO),
-                            Text(f"Hostname: {equipo.get('HOSTNAME', 'N/A')}", color=COLOR_TEXTO_SEC),
-                            Text(f"Usuario: {equipo.get('USUARIO_ASIGNADO', 'N/A')}", color=COLOR_TEXTO_SEC),
-                        ], spacing=20),
-                        Divider(color=COLOR_SUPERFICIE_2),
-                        Text("📋 Información General", weight=FontWeight.BOLD, color=COLOR_ACENTO),
+                            Icon(icons.INFO_OUTLINE, size=16, color=COLOR_ACENTO),
+                            Text("Información General", weight=FontWeight.BOLD, color=COLOR_ACENTO, size=13)
+                        ], spacing=8),
                         txt_nombre,
                         Row([dd_grupo, dd_tipo], spacing=10),
                         Row([dd_estado, txt_so], spacing=10),
                         txt_ubicacion,
-                        Divider(color=COLOR_SUPERFICIE_2),
-                        Text("🖥️ Especificaciones de Hardware", weight=FontWeight.BOLD, color=COLOR_ACENTO),
+                        
+                        Divider(color=COLOR_BORDE),
+                        
+                        # Sección Hardware
+                        Row([
+                            Icon(icons.MEMORY, size=16, color=COLOR_INFO),
+                            Text("Especificaciones de Hardware", weight=FontWeight.BOLD, color=COLOR_INFO, size=13)
+                        ], spacing=8),
                         Row([txt_marca, txt_modelo], spacing=10),
                         txt_serie,
                         txt_procesador,
                         Row([txt_ram, txt_disco], spacing=10),
-                        Divider(color=COLOR_SUPERFICIE_2),
-                        Text("📝 Notas", weight=FontWeight.BOLD, color=COLOR_ACENTO),
+                        
+                        Divider(color=COLOR_BORDE),
+                        
+                        # Sección Notas
+                        Row([
+                            Icon(icons.NOTES, size=16, color=COLOR_ADVERTENCIA),
+                            Text("Notas", weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA, size=13)
+                        ], spacing=8),
                         txt_notas
-                    ], spacing=10, scroll=ScrollMode.AUTO),
-                    width=450,
-                    height=500
+                    ], spacing=8, scroll=ScrollMode.AUTO),
+                    width=420,
+                    height=480,
+                    padding=5
                 ),
                 actions_alignment=MainAxisAlignment.END,
                 actions=[
-                    ft.TextButton("Cancelar", on_click=lambda e: cerrar_dialogo(e)),
-                    ft.Button(
-                        "💾 Guardar",
-                        on_click=lambda e: guardar_equipo(e),
+                    ft.TextButton(
+                        content=Row([
+                            Icon(icons.CLOSE, size=18),
+                            Text("Cancelar")
+                        ], spacing=5),
+                        on_click=self._cerrar_dialogo
+                    ),
+                    ft.ElevatedButton(
+                        content=Row([
+                            Icon(icons.SAVE, size=18, color=colors.WHITE),
+                            Text("Guardar", color=colors.WHITE)
+                        ], spacing=5),
                         bgcolor=COLOR_EXITO,
-                        color=colors.WHITE
+                        on_click=lambda e: guardar_equipo(e)
                     )
                 ]
             )
             
-            print(">>> ASIGNANDO DIALOGO A PAGE <<<")
             self.page.show_dialog(dlg)
-            print(">>> DIALOGO MOSTRADO <<<")
         except Exception as ex:
-            print(f">>> ERROR EN DIALOGO: {ex} <<<")
+            self._mostrar_error("Error", str(ex))
             traceback.print_exc()
     
     def _dialogo_agregar_equipo(self, e=None):
         """Muestra el diálogo para agregar un equipo manualmente."""
         txt_mac = ft.TextField(
             label="Dirección MAC *",
-            width=400,
-            hint_text="Ej: AA:BB:CC:DD:EE:FF"
+            width=380,
+            hint_text="Ej: AA:BB:CC:DD:EE:FF",
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            prefix_icon=icons.ROUTER
         )
         txt_nombre = ft.TextField(
             label="Nombre del Equipo",
-            width=400,
-            hint_text="Ej: PC-VENTAS-01"
+            width=380,
+            hint_text="Ej: PC-VENTAS-01",
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            prefix_icon=icons.LABEL
         )
         txt_hostname = ft.TextField(
             label="Hostname",
-            width=195
+            width=185,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO
         )
         txt_usuario = ft.TextField(
             label="Usuario Asignado",
-            width=195
+            width=185,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO
         )
         dd_grupo = ft.Dropdown(
             label="Grupo/Departamento",
             value="Sin Asignar",
-            width=195,
+            width=185,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
             options=[ft.dropdown.Option(g) for g in GRUPOS_EQUIPOS]
         )
         dd_tipo = ft.Dropdown(
             label="Tipo de Equipo",
             value="Desktop",
-            width=195,
+            width=185,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
             options=[ft.dropdown.Option(t) for t in TIPOS_EQUIPO]
         )
         
-        def cerrar_dialogo(e=None):
-            self.page.pop_dialog()
-        
         def agregar_equipo(e):
             if not txt_mac.value:
-                self._mostrar_snackbar("❌ La dirección MAC es obligatoria", COLOR_ERROR)
+                self._mostrar_advertencia("Campo requerido", "La dirección MAC es obligatoria.")
                 return
             
             # Validar formato MAC
@@ -3599,10 +3675,13 @@ class PanelAdminIT:
             
             # Verificar si ya existe
             if self.gestor.obtener_equipo_por_mac(mac):
-                self._mostrar_snackbar("❌ Ya existe un equipo con esa MAC", COLOR_ERROR)
+                self._mostrar_error("Equipo duplicado", "Ya existe un equipo con esa dirección MAC.")
                 return
             
             try:
+                self._cerrar_dialogo(None)
+                self._mostrar_carga("Agregando equipo...")
+                
                 # Registrar equipo
                 self.gestor.registrar_o_actualizar_equipo(
                     mac,
@@ -3616,37 +3695,68 @@ class PanelAdminIT:
                     grupo=dd_grupo.value,
                     tipo_equipo=dd_tipo.value
                 )
-                self._mostrar_snackbar("✅ Equipo agregado correctamente", COLOR_EXITO)
-                self.page.pop_dialog()
+                
+                self._ocultar_carga()
+                self._mostrar_exito("Equipo Agregado", f"El equipo {txt_nombre.value or mac} se registró correctamente.")
                 self._refrescar_inventario()
             except Exception as ex:
-                self._mostrar_snackbar(f"❌ Error: {str(ex)}", COLOR_ERROR)
+                self._ocultar_carga()
+                self._mostrar_error("Error al agregar", str(ex))
         
         dlg = AlertDialog(
             modal=True,
-            title=Text("➕ Agregar Equipo Manualmente", weight=FontWeight.BOLD),
+            shape=RoundedRectangleBorder(radius=16),
+            bgcolor=COLOR_SUPERFICIE,
+            title=Row([
+                Container(
+                    content=Icon(icons.ADD_CIRCLE, size=24, color=colors.WHITE),
+                    bgcolor=COLOR_EXITO,
+                    padding=8,
+                    border_radius=8
+                ),
+                Text("Agregar Equipo", weight=FontWeight.BOLD, color=COLOR_TEXTO, size=18)
+            ], spacing=12),
             content=Container(
                 content=Column([
-                    Text("Los equipos se registran automáticamente al crear un ticket.", 
-                         color=COLOR_TEXTO_SEC, size=12),
-                    Text("Use este formulario solo para equipos que no generan tickets.", 
-                         color=COLOR_TEXTO_SEC, size=12),
-                    Divider(color=COLOR_SUPERFICIE_2),
+                    Container(
+                        content=Row([
+                            Icon(icons.INFO_OUTLINE, size=16, color=COLOR_INFO),
+                            Column([
+                                Text("Los equipos se registran automáticamente al crear un ticket.", 
+                                     color=COLOR_TEXTO_SEC, size=11),
+                                Text("Use este formulario solo para equipos sin tickets.", 
+                                     color=COLOR_TEXTO_SEC, size=11)
+                            ], spacing=2)
+                        ], spacing=8),
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        padding=10,
+                        border_radius=8
+                    ),
+                    Container(height=5),
                     txt_mac,
                     txt_nombre,
                     Row([txt_hostname, txt_usuario], spacing=10),
                     Row([dd_grupo, dd_tipo], spacing=10),
-                ], spacing=15),
-                width=420
+                ], spacing=12),
+                width=420,
+                padding=5
             ),
             actions_alignment=MainAxisAlignment.END,
             actions=[
-                ft.TextButton("Cancelar", on_click=cerrar_dialogo),
-                ft.Button(
-                    "➕ Agregar",
-                    on_click=agregar_equipo,
+                ft.TextButton(
+                    content=Row([
+                        Icon(icons.CLOSE, size=18),
+                        Text("Cancelar")
+                    ], spacing=5),
+                    on_click=self._cerrar_dialogo
+                ),
+                ft.ElevatedButton(
+                    content=Row([
+                        Icon(icons.ADD, size=18, color=colors.WHITE),
+                        Text("Agregar", color=colors.WHITE)
+                    ], spacing=5),
                     bgcolor=COLOR_EXITO,
-                    color=colors.WHITE
+                    on_click=agregar_equipo
                 )
             ]
         )
