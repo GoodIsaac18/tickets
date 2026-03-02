@@ -970,8 +970,7 @@ class PanelAdminIT:
             options=opciones,
             width=380,
             border_color=COLOR_BORDE,
-            focused_border_color=COLOR_PRIMARIO,
-            prefix_icon=icons.CONFIRMATION_NUMBER
+            focused_border_color=COLOR_PRIMARIO
         )
         
         def asignar(e):
@@ -2601,8 +2600,7 @@ class PanelAdminIT:
             options=[dropdown.Option(e) for e in estados_disponibles],
             width=200,
             border_color=COLOR_BORDE,
-            focused_border_color=COLOR_PRIMARIO,
-            prefix_icon=icons.FLAG
+            focused_border_color=COLOR_PRIMARIO
         )
         
         txt_notas = TextField(
