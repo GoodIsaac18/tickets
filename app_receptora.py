@@ -1064,7 +1064,7 @@ class PanelAdminIT:
             options=[dropdown.Option("Todos")] + [dropdown.Option(e) for e in estados_activos],
             value="Todos",
             width=150,
-            on_select=lambda e: self._aplicar_filtros()
+            on_change=lambda e: self._aplicar_filtros()
         )
         
         self.filtro_categoria = Dropdown(
@@ -1072,7 +1072,7 @@ class PanelAdminIT:
             options=[dropdown.Option("Todas")] + [dropdown.Option(c) for c in CATEGORIAS_DISPONIBLES],
             value="Todas",
             width=150,
-            on_select=lambda e: self._aplicar_filtros()
+            on_change=lambda e: self._aplicar_filtros()
         )
         
         self.txt_busqueda = TextField(
@@ -1084,6 +1084,15 @@ class PanelAdminIT:
         
         # Construir tabla
         self.tabla_tickets = self._construir_tabla_tickets(df)
+        
+        # Contenedor de la tabla (para actualización dinámica)
+        self.contenedor_tabla_tickets = Container(
+            content=self.tabla_tickets,
+            bgcolor=COLOR_SUPERFICIE,
+            border_radius=ft.BorderRadius.all(10),
+            padding=10,
+            expand=True
+        )
         
         return Column([
             Row([
@@ -1137,14 +1146,8 @@ class PanelAdminIT:
             
             Container(height=15),
             
-            # Tabla de tickets
-            Container(
-                content=self.tabla_tickets,
-                bgcolor=COLOR_SUPERFICIE,
-                border_radius=ft.BorderRadius.all(10),
-                padding=10,
-                expand=True
-            )
+            # Tabla de tickets (contenedor dinámico)
+            self.contenedor_tabla_tickets
         ], expand=True)
     
     def _construir_tabla_tickets(self, df: pd.DataFrame) -> DataTable:
@@ -1229,8 +1232,11 @@ class PanelAdminIT:
                 df["MAC_ADDRESS"].str.lower().str.contains(busqueda, na=False)
             ]
         
+        # Actualizar solo la tabla dentro del contenedor
         self.tabla_tickets = self._construir_tabla_tickets(df)
-        self._refrescar_vista()
+        if hasattr(self, 'contenedor_tabla_tickets'):
+            self.contenedor_tabla_tickets.content = self.tabla_tickets
+            self.page.update()
     
     # =========================================================================
     # VISTA: COLA DE TICKETS
