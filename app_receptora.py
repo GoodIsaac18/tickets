@@ -3058,6 +3058,59 @@ class PanelAdminIT:
             # Referencia a self para el callback
             app_self = self
             
+            # Callback para nuevos tickets
+            def on_nuevo_ticket(ticket):
+                """Notifica cuando hay un nuevo ticket."""
+                try:
+                    turno = ticket.get("TURNO", "N/A")
+                    usuario = ticket.get("USUARIO_AD", "")
+                    categoria = ticket.get("CATEGORIA", "General")
+                    prioridad = ticket.get("PRIORIDAD", "Media")
+                    descripcion = ticket.get("DESCRIPCION", "")[:100]
+                    
+                    print(f"[SERVIDOR] 🎫 Nuevo ticket recibido: Turno {turno} - {usuario}")
+                    
+                    # Determinar color según prioridad
+                    color_prioridad = COLOR_INFO
+                    icono = icons.CONFIRMATION_NUMBER
+                    if prioridad == "Crítica":
+                        color_prioridad = COLOR_ERROR
+                        icono = icons.PRIORITY_HIGH
+                    elif prioridad == "Alta":
+                        color_prioridad = COLOR_ADVERTENCIA
+                        icono = icons.WARNING
+                    
+                    # Mostrar notificación en la UI
+                    try:
+                        if hasattr(app_self, 'page') and app_self.page:
+                            snack = SnackBar(
+                                content=Row([
+                                    Icon(icono, color=colors.WHITE, size=20),
+                                    Column([
+                                        Text(f"🎫 Nuevo Ticket - Turno {turno}", 
+                                             color=colors.WHITE, weight=FontWeight.BOLD, size=14),
+                                        Text(f"{usuario} • {categoria} • {prioridad}", 
+                                             color=colors.WHITE, size=12)
+                                    ], spacing=2, tight=True)
+                                ], spacing=10),
+                                bgcolor=color_prioridad,
+                                duration=8000,
+                                action="Ver Tickets",
+                                action_color=colors.WHITE,
+                                on_action=lambda e: app_self._ir_a_tickets()
+                            )
+                            app_self.page.overlay.append(snack)
+                            snack.open = True
+                            app_self.page.update()
+                            
+                            # Refrescar vista si estamos en tickets o dashboard
+                            if app_self.vista_actual in [0, 2, 3]:  # Dashboard, Tickets, Cola
+                                app_self._refrescar_vista()
+                    except Exception as e:
+                        print(f"[NOTIFICACION TICKET] Error actualizando UI: {e}")
+                except Exception as e:
+                    print(f"[NOTIFICACION TICKET] Error: {e}")
+            
             # Callback para nuevas solicitudes de enlace
             def on_nueva_solicitud(solicitud):
                 """Notifica cuando hay una nueva solicitud de enlace."""
@@ -3087,8 +3140,12 @@ class PanelAdminIT:
                 except Exception as e:
                     print(f"[NOTIFICACION] Error: {e}")
             
-            # Iniciar servidor en segundo plano con callback de solicitudes
-            if iniciar_servidor(puerto=self.servidor_puerto, callback_solicitud=on_nueva_solicitud):
+            # Iniciar servidor en segundo plano con callbacks de solicitudes y tickets
+            if iniciar_servidor(
+                puerto=self.servidor_puerto, 
+                callback_solicitud=on_nueva_solicitud,
+                callback_ticket=on_nuevo_ticket
+            ):
                 print(f"[SERVIDOR] Servidor de tickets iniciado en {self.servidor_ip}:{self.servidor_puerto}")
                 # Guardar configuración
                 guardar_config_servidor(self.servidor_ip, self.servidor_puerto)
