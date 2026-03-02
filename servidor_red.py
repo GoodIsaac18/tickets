@@ -213,14 +213,42 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 prioridad=datos.get("prioridad", "Media")
             )
             
-            # ===== NOTIFICACIÓN DE WINDOWS (siempre activa) =====
+            # ===== NOTIFICACIÓN DE WINDOWS (igual que recordatorio) =====
             if NOTIFICACIONES_DISPONIBLES:
                 try:
-                    _notif_ticket(ticket)
-                    print(f"[SERVIDOR] 🔔 Notificación Windows: Nuevo ticket {ticket.get('TURNO', 'N/A')}")
+                    from winotify import Notification, audio
+                    
+                    turno = ticket.get("TURNO", "N/A")
+                    categoria = ticket.get("CATEGORIA", "General")
+                    usuario = ticket.get("USUARIO_AD", "")
+                    prioridad = ticket.get("PRIORIDAD", "Media")
+                    
+                    # Emoji según prioridad
+                    emoji = "🎫"
+                    if prioridad == "Crítica":
+                        emoji = "🚨"
+                    elif prioridad == "Alta":
+                        emoji = "⚠️"
+                    
+                    notif = Notification(
+                        app_id="Soporte Técnico",
+                        title=f"{emoji} Nuevo Ticket - Turno {turno}",
+                        msg=f"Usuario: {usuario}\nCategoría: {categoria}\nPrioridad: {prioridad}",
+                        duration="long"
+                    )
+                    
+                    # Audio según prioridad
+                    if prioridad in ["Crítica", "Alta"]:
+                        notif.set_audio(audio.Reminder, loop=False)
+                    else:
+                        notif.set_audio(audio.Default, loop=False)
+                    
+                    notif.show()
+                    print(f"[SERVIDOR] 🔔 Notificación Windows: Nuevo ticket {turno}")
                 except Exception as e:
-                    print(f"[SERVIDOR] Error en notificación: {e}")
+                    print(f"[SERVIDOR] Error en notificación ticket: {e}")
             
+            # Agregar a la cola de mensajes para la UI
             if _callback_nuevo_ticket:
                 _cola_mensajes.put(("ticket", ticket))
             
