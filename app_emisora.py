@@ -53,9 +53,13 @@ COLOR_TARJETA = "#FFFFFF"           # Blanco
 COLOR_TEXTO = "#1E293B"             # Gris oscuro
 COLOR_TEXTO_SEC = "#64748B"         # Gris medio
 COLOR_EXITO = "#10B981"             # Verde esmeralda
+COLOR_EXITO_CLARO = "#D1FAE5"       # Verde claro fondo
 COLOR_ERROR = "#EF4444"             # Rojo
+COLOR_ERROR_CLARO = "#FEE2E2"       # Rojo claro fondo
 COLOR_ADVERTENCIA = "#F59E0B"       # Naranja
+COLOR_ADVERTENCIA_CLARO = "#FEF3C7" # Naranja claro fondo
 COLOR_INFO = "#06B6D4"              # Cyan
+COLOR_INFO_CLARO = "#CFFAFE"        # Cyan claro fondo
 COLOR_BORDE = "#E2E8F0"             # Gris claro para bordes
 
 # Meses en español
@@ -82,6 +86,49 @@ ICONOS_CATEGORIA = {
     "Correo Electrónico": icons.EMAIL,
     "Accesos/Permisos": icons.LOCK,
     "Otro": icons.HELP_OUTLINE
+}
+
+
+# =============================================================================
+# CONSTANTES DE DIÁLOGOS
+# =============================================================================
+DIALOGO_TIPOS = {
+    "error": {
+        "icono": icons.ERROR_ROUNDED,
+        "color": COLOR_ERROR,
+        "color_fondo": COLOR_ERROR_CLARO,
+        "titulo": "¡Ups! Algo salió mal"
+    },
+    "exito": {
+        "icono": icons.CHECK_CIRCLE_ROUNDED,
+        "color": COLOR_EXITO,
+        "color_fondo": COLOR_EXITO_CLARO,
+        "titulo": "¡Perfecto!"
+    },
+    "advertencia": {
+        "icono": icons.WARNING_ROUNDED,
+        "color": COLOR_ADVERTENCIA,
+        "color_fondo": COLOR_ADVERTENCIA_CLARO,
+        "titulo": "Atención"
+    },
+    "info": {
+        "icono": icons.INFO_ROUNDED,
+        "color": COLOR_INFO,
+        "color_fondo": COLOR_INFO_CLARO,
+        "titulo": "Información"
+    },
+    "cargando": {
+        "icono": icons.HOURGLASS_TOP_ROUNDED,
+        "color": COLOR_PRIMARIO,
+        "color_fondo": "#EFF6FF",
+        "titulo": "Procesando..."
+    },
+    "conexion": {
+        "icono": icons.WIFI_OFF_ROUNDED,
+        "color": COLOR_ERROR,
+        "color_fondo": COLOR_ERROR_CLARO,
+        "titulo": "Error de Conexión"
+    }
 }
 
 
@@ -120,6 +167,11 @@ class AppEmisora:
         self.lbl_hora: Optional[Text] = None
         self.panel_mi_ticket: Optional[Container] = None
         self.contenedor_principal: Optional[Column] = None
+        
+        # Sistema de overlay de carga
+        self.overlay_carga: Optional[Container] = None
+        self.texto_carga: Optional[Text] = None
+        self._carga_activa: bool = False
         
         # Vista actual: "principal" o "configuracion"
         self.vista_actual: str = "principal"
@@ -311,41 +363,46 @@ class AppEmisora:
         threading.Thread(target=verificar_loop, daemon=True, name="VerificarEnlace").start()
     
     def _actualizar_estado_enlace_ui(self):
-        """Actualiza la UI para mostrar el estado del enlace."""
+        """Actualiza la UI para mostrar el estado del enlace - Versión mejorada."""
         try:
             if hasattr(self, 'panel_estado_enlace') and self.panel_estado_enlace:
                 mostrar_btn_reenviar = False
                 
                 if self.enlazado:
                     self.panel_estado_enlace.bgcolor = COLOR_EXITO
-                    self.txt_estado_enlace.value = "✅ Conectado y enlazado"
-                    self.txt_estado_enlace.color = colors.WHITE
+                    self.txt_estado_enlace.value = "Conectado y enlazado"
+                    if hasattr(self, 'txt_subtexto_enlace'):
+                        self.txt_subtexto_enlace.value = "Puedes crear tickets"
                     if hasattr(self, 'btn_enviar') and self.btn_enviar:
                         self.btn_enviar.disabled = False
                 elif self.estado_enlace == "pendiente":
                     self.panel_estado_enlace.bgcolor = COLOR_ADVERTENCIA
-                    self.txt_estado_enlace.value = "⏳ Esperando aprobación del administrador..."
-                    self.txt_estado_enlace.color = colors.WHITE
+                    self.txt_estado_enlace.value = "Esperando aprobación"
+                    if hasattr(self, 'txt_subtexto_enlace'):
+                        self.txt_subtexto_enlace.value = "El administrador debe aprobar tu equipo"
                     if hasattr(self, 'btn_enviar') and self.btn_enviar:
                         self.btn_enviar.disabled = True
                 elif self.estado_enlace == "rechazado":
                     self.panel_estado_enlace.bgcolor = COLOR_ERROR
-                    self.txt_estado_enlace.value = "❌ Solicitud rechazada"
-                    self.txt_estado_enlace.color = colors.WHITE
+                    self.txt_estado_enlace.value = "Solicitud rechazada"
+                    if hasattr(self, 'txt_subtexto_enlace'):
+                        self.txt_subtexto_enlace.value = "Contacta al administrador"
                     mostrar_btn_reenviar = True
                     if hasattr(self, 'btn_enviar') and self.btn_enviar:
                         self.btn_enviar.disabled = True
                 elif self.estado_enlace == "revocado":
                     self.panel_estado_enlace.bgcolor = COLOR_ERROR
-                    self.txt_estado_enlace.value = "🚫 Enlace revocado"
-                    self.txt_estado_enlace.color = colors.WHITE
+                    self.txt_estado_enlace.value = "Acceso revocado"
+                    if hasattr(self, 'txt_subtexto_enlace'):
+                        self.txt_subtexto_enlace.value = "Tu acceso fue revocado"
                     mostrar_btn_reenviar = True
                     if hasattr(self, 'btn_enviar') and self.btn_enviar:
                         self.btn_enviar.disabled = True
                 else:
                     self.panel_estado_enlace.bgcolor = COLOR_INFO
-                    self.txt_estado_enlace.value = "🔄 Conectando al servidor..."
-                    self.txt_estado_enlace.color = colors.WHITE
+                    self.txt_estado_enlace.value = "Conectando al servidor"
+                    if hasattr(self, 'txt_subtexto_enlace'):
+                        self.txt_subtexto_enlace.value = "Estableciendo conexión..."
                 
                 # Actualizar visibilidad del botón de reenviar
                 if hasattr(self, 'btn_reenviar_solicitud') and self.btn_reenviar_solicitud:
@@ -517,56 +574,93 @@ class AppEmisora:
         threading.Thread(target=reenviar, daemon=True).start()
     
     def _crear_panel_estado_enlace(self) -> Container:
-        """Panel que muestra el estado de enlace con el servidor."""
-        # Determinar estado inicial
+        """Panel que muestra el estado de enlace con el servidor - Versión mejorada."""
+        # Determinar estado inicial con iconos mejorados
         mostrar_btn_reenviar = False
+        icono = icons.LINK_ROUNDED
+        
         if self.enlazado:
             color_fondo = COLOR_EXITO
-            texto = "✅ Conectado y enlazado"
+            color_fondo_claro = COLOR_EXITO_CLARO
+            texto = "Conectado y enlazado"
+            icono = icons.CHECK_CIRCLE_ROUNDED
+            subtexto = "Puedes crear tickets"
         elif self.estado_enlace == "pendiente":
             color_fondo = COLOR_ADVERTENCIA
-            texto = "⏳ Esperando aprobación del administrador..."
+            color_fondo_claro = COLOR_ADVERTENCIA_CLARO
+            texto = "Esperando aprobación"
+            icono = icons.HOURGLASS_TOP_ROUNDED
+            subtexto = "El administrador debe aprobar tu equipo"
         elif self.estado_enlace == "rechazado":
             color_fondo = COLOR_ERROR
-            texto = "❌ Solicitud rechazada"
+            color_fondo_claro = COLOR_ERROR_CLARO
+            texto = "Solicitud rechazada"
+            icono = icons.CANCEL_ROUNDED
+            subtexto = "Contacta al administrador"
             mostrar_btn_reenviar = True
         elif self.estado_enlace == "revocado":
             color_fondo = COLOR_ERROR
-            texto = "🚫 Enlace revocado"
+            color_fondo_claro = COLOR_ERROR_CLARO
+            texto = "Acceso revocado"
+            icono = icons.BLOCK_ROUNDED
+            subtexto = "Tu acceso fue revocado"
             mostrar_btn_reenviar = True
         elif self.servidor_conectado:
             color_fondo = COLOR_INFO
-            texto = "🔄 Conectando al servidor..."
+            color_fondo_claro = COLOR_INFO_CLARO
+            texto = "Conectando al servidor"
+            icono = icons.SYNC_ROUNDED
+            subtexto = "Estableciendo conexión..."
         else:
             color_fondo = COLOR_TEXTO_SEC
-            texto = "📡 Buscando servidor en la red..."
+            color_fondo_claro = "#F1F5F9"
+            texto = "Buscando servidor"
+            icono = icons.WIFI_FIND_ROUNDED
+            subtexto = "Escaneando la red local..."
         
-        self.txt_estado_enlace = Text(texto, size=12, color=colors.WHITE, weight=FontWeight.W_500)
+        self.txt_estado_enlace = Text(texto, size=13, color=colors.WHITE, weight=FontWeight.W_600)
+        self.txt_subtexto_enlace = Text(subtexto, size=10, color=colors.WHITE70)
         
-        # Botón para reenviar solicitud
-        self.btn_reenviar_solicitud = ft.TextButton(
-            "🔄 Reenviar solicitud",
-            on_click=self._reenviar_solicitud_enlace,
+        # Botón para reenviar solicitud (mejorado)
+        self.btn_reenviar_solicitud = Button(
+            content=Row([
+                Icon(icons.REFRESH_ROUNDED, size=14, color=colors.WHITE),
+                Text("Reintentar", size=11, color=colors.WHITE, weight=FontWeight.W_500),
+            ], spacing=5, alignment=MainAxisAlignment.CENTER),
+            bgcolor=colors.WHITE24,
             style=ft.ButtonStyle(
-                color=colors.WHITE,
-                bgcolor=colors.WHITE24,
-                padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+                shape=ft.RoundedRectangleBorder(radius=8),
+                padding=ft.Padding.symmetric(horizontal=12, vertical=8),
             ),
+            height=32,
+            on_click=self._reenviar_solicitud_enlace,
             visible=mostrar_btn_reenviar
         )
         
         self.panel_estado_enlace = Container(
-            content=Column([
-                Row([
-                    Icon(icons.LINK, size=18, color=colors.WHITE),
+            content=Row([
+                # Icono con fondo circular
+                Container(
+                    content=Icon(icono, size=22, color=color_fondo),
+                    bgcolor=colors.WHITE,
+                    border_radius=ft.BorderRadius.all(20),
+                    width=38,
+                    height=38,
+                    alignment=ft.Alignment(0, 0),
+                ),
+                # Textos
+                Column([
                     self.txt_estado_enlace,
-                ], spacing=8, alignment=MainAxisAlignment.CENTER),
-                Row([self.btn_reenviar_solicitud], alignment=MainAxisAlignment.CENTER) if mostrar_btn_reenviar else Container()
-            ], spacing=5, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                    self.txt_subtexto_enlace,
+                ], spacing=1, expand=True),
+                # Botón si aplica
+                self.btn_reenviar_solicitud if mostrar_btn_reenviar else Container(),
+            ], spacing=12),
             bgcolor=color_fondo,
-            padding=ft.Padding.symmetric(horizontal=15, vertical=10),
+            padding=ft.Padding.symmetric(horizontal=15, vertical=12),
             margin=ft.Padding.only(left=20, right=20, top=10),
-            border_radius=ft.BorderRadius.all(8),
+            border_radius=ft.BorderRadius.all(12),
+            animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
         )
         
         return self.panel_estado_enlace
@@ -1462,16 +1556,226 @@ class AppEmisora:
             self.page.update()
             self._mostrar_error(f"Error: {str(e)}")
     
-    def _mostrar_mensaje_exito(self, mensaje: str):
-        """Muestra un mensaje de éxito."""
-        snackbar = SnackBar(
-            content=Text(mensaje, color=colors.WHITE),
-            bgcolor=COLOR_EXITO,
-            duration=3000,
+    # =========================================================================
+    # SISTEMA DE DIÁLOGOS MEJORADOS
+    # =========================================================================
+    
+    def _crear_dialogo_profesional(self, tipo: str, titulo: str, mensaje: str, 
+                                    boton_texto: str = "Entendido",
+                                    boton_accion = None,
+                                    mostrar_boton_secundario: bool = False,
+                                    boton_secundario_texto: str = "Cancelar",
+                                    boton_secundario_accion = None) -> AlertDialog:
+        """Crea un diálogo profesional con animaciones y estilo moderno."""
+        config = DIALOGO_TIPOS.get(tipo, DIALOGO_TIPOS["info"])
+        
+        # Icono animado grande
+        icono_container = Container(
+            content=Container(
+                content=Icon(config["icono"], size=50, color=config["color"]),
+                bgcolor=config["color_fondo"],
+                border_radius=ft.BorderRadius.all(50),
+                width=90,
+                height=90,
+                alignment=ft.Alignment(0, 0),
+                animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+            ),
+            alignment=ft.Alignment(0, 0),
         )
-        self.page.overlay.append(snackbar)
-        snackbar.open = True
+        
+        # Contenido del diálogo
+        contenido = Container(
+            content=Column([
+                icono_container,
+                Container(height=15),
+                Text(
+                    titulo,
+                    size=18,
+                    weight=FontWeight.BOLD,
+                    color=COLOR_TEXTO,
+                    text_align=TextAlign.CENTER,
+                ),
+                Container(height=8),
+                Container(
+                    content=Text(
+                        mensaje,
+                        size=14,
+                        color=COLOR_TEXTO_SEC,
+                        text_align=TextAlign.CENTER,
+                    ),
+                    padding=ft.Padding.symmetric(horizontal=10),
+                ),
+            ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=0),
+            width=300,
+            padding=ft.Padding.only(top=20, bottom=10, left=10, right=10),
+        )
+        
+        # Botones
+        acciones = []
+        
+        # Botón secundario (si aplica)
+        if mostrar_boton_secundario:
+            acciones.append(
+                Button(
+                    content=Text(boton_secundario_texto, color=COLOR_TEXTO_SEC, weight=FontWeight.W_500),
+                    bgcolor=colors.TRANSPARENT,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                        overlay_color=COLOR_BORDE,
+                    ),
+                    height=45,
+                    on_click=boton_secundario_accion or (lambda e: self._cerrar_dialogo()),
+                )
+            )
+        
+        # Botón principal
+        acciones.append(
+            Button(
+                content=Row([
+                    Icon(icons.CHECK_ROUNDED if tipo == "exito" else icons.ARROW_FORWARD_ROUNDED, 
+                         color=colors.WHITE, size=18),
+                    Text(boton_texto, color=colors.WHITE, weight=FontWeight.W_600),
+                ], spacing=8, alignment=MainAxisAlignment.CENTER),
+                bgcolor=config["color"],
+                style=ft.ButtonStyle(
+                    shape=ft.RoundedRectangleBorder(radius=10),
+                    overlay_color=colors.WHITE24,
+                ),
+                width=140,
+                height=45,
+                on_click=boton_accion or (lambda e: self._cerrar_dialogo()),
+            )
+        )
+        
+        return AlertDialog(
+            modal=True,
+            content=contenido,
+            actions=acciones,
+            actions_alignment=MainAxisAlignment.CENTER,
+            shape=ft.RoundedRectangleBorder(radius=20),
+        )
+    
+    def _mostrar_mensaje_exito(self, mensaje: str, titulo: str = "¡Listo!"):
+        """Muestra un diálogo de éxito profesional."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="exito",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="Continuar"
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
         self.page.update()
+    
+    def _mostrar_advertencia(self, mensaje: str, titulo: str = "Atención"):
+        """Muestra un diálogo de advertencia."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="advertencia",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="Entendido"
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    def _mostrar_info(self, mensaje: str, titulo: str = "Información"):
+        """Muestra un diálogo informativo."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="info",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="OK"
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    # =========================================================================
+    # SISTEMA DE OVERLAY DE CARGA
+    # =========================================================================
+    
+    def _mostrar_carga(self, mensaje: str = "Procesando..."):
+        """Muestra un overlay de carga con animación."""
+        if self._carga_activa:
+            # Solo actualizar el mensaje si ya está activo
+            if self.texto_carga:
+                self.texto_carga.value = mensaje
+                self.page.update()
+            return
+        
+        self._carga_activa = True
+        
+        # Crear texto de carga
+        self.texto_carga = Text(mensaje, size=14, color=COLOR_TEXTO, weight=FontWeight.W_500)
+        
+        # Crear overlay
+        self.overlay_carga = Container(
+            content=Container(
+                content=Column([
+                    # Animación de loading
+                    Container(
+                        content=ft.Stack([
+                            # Círculo de fondo
+                            Container(
+                                width=70,
+                                height=70,
+                                border_radius=ft.BorderRadius.all(35),
+                                bgcolor=COLOR_PRIMARIO + "15",
+                            ),
+                            # Progress ring
+                            ProgressRing(
+                                width=70,
+                                height=70,
+                                stroke_width=4,
+                                color=COLOR_PRIMARIO,
+                            ),
+                            # Icono central
+                            Container(
+                                content=Icon(icons.SUPPORT_AGENT, size=28, color=COLOR_PRIMARIO),
+                                width=70,
+                                height=70,
+                                alignment=ft.Alignment(0, 0),
+                            ),
+                        ]),
+                        animate=ft.Animation(500, ft.AnimationCurve.EASE_IN_OUT),
+                    ),
+                    Container(height=20),
+                    self.texto_carga,
+                    Container(height=5),
+                    Text("Por favor espera...", size=11, color=COLOR_TEXTO_SEC),
+                ], horizontal_alignment=CrossAxisAlignment.CENTER),
+                bgcolor=COLOR_TARJETA,
+                border_radius=ft.BorderRadius.all(20),
+                padding=ft.Padding.symmetric(horizontal=40, vertical=30),
+                shadow=ft.BoxShadow(
+                    spread_radius=0,
+                    blur_radius=30,
+                    color=colors.BLACK12,
+                    offset=ft.Offset(0, 10),
+                ),
+            ),
+            bgcolor=colors.BLACK54,
+            expand=True,
+            alignment=ft.Alignment(0, 0),
+            animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_IN),
+        )
+        
+        self.page.overlay.append(self.overlay_carga)
+        self.page.update()
+    
+    def _ocultar_carga(self):
+        """Oculta el overlay de carga."""
+        if not self._carga_activa:
+            return
+        
+        self._carga_activa = False
+        
+        if self.overlay_carga and self.overlay_carga in self.page.overlay:
+            self.page.overlay.remove(self.overlay_carga)
+            self.overlay_carga = None
+            self.texto_carga = None
+            self.page.update()
 
     def _construir_ui(self) -> None:
         """Construye la interfaz completa."""
@@ -1537,126 +1841,315 @@ class AppEmisora:
         return True, ""
     
     def _mostrar_dialogo_turno(self, ticket: dict) -> None:
-        """Muestra el diálogo con información del turno."""
+        """Muestra el diálogo con información del turno - Versión mejorada."""
         turno = ticket.get("TURNO", "N/A")
         id_ticket = ticket.get("ID_TICKET", "N/A")
+        categoria = ticket.get("CATEGORIA", "General")
         posicion = self.gestor.obtener_posicion_cola(id_ticket)
         
         if self.hay_disponible:
             mensaje = "¡Un técnico te atenderá en breve!"
             color_turno = COLOR_EXITO
-            icono_estado = icons.ROCKET_LAUNCH
+            icono_estado = icons.ROCKET_LAUNCH_ROUNDED
+            estado_texto = "Prioridad Alta"
         else:
-            mensaje = "Tu ticket está en cola. Te atenderemos pronto."
+            mensaje = "Tu ticket está en cola"
             color_turno = COLOR_ADVERTENCIA
-            icono_estado = icons.SCHEDULE
+            icono_estado = icons.HOURGLASS_TOP_ROUNDED
+            estado_texto = f"Posición #{posicion}" if posicion else "En cola"
         
         # Obtener fecha/hora actual formateada
-        fecha_hora_actual = datetime.now().strftime("%d/%m/%Y %I:%M %p")
+        fecha_hora_actual = datetime.now().strftime("%d/%m/%Y • %I:%M %p")
         
         dialogo = AlertDialog(
             modal=True,
-            title=Row([
-                Icon(icons.CHECK_CIRCLE, color=COLOR_EXITO, size=28),
-                Text("¡Ticket Creado!", weight=FontWeight.BOLD, size=18, color=COLOR_EXITO),
-            ], spacing=10),
             content=Container(
                 content=Column([
-                    # Turno grande
+                    # Icono de éxito animado
                     Container(
-                        content=Column([
-                            Text("Tu número de turno", size=12, color=COLOR_TEXTO_SEC),
-                            Text(turno, size=52, weight=FontWeight.BOLD, color=color_turno),
-                            Row([
-                                Icon(icono_estado, size=16, color=color_turno),
-                                Text(mensaje, size=12, color=COLOR_TEXTO),
-                            ], spacing=5, alignment=MainAxisAlignment.CENTER),
-                        ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=5),
-                        bgcolor=COLOR_FONDO,
-                        border_radius=ft.BorderRadius.all(15),
-                        padding=ft.Padding.symmetric(horizontal=30, vertical=20),
+                        content=ft.Stack([
+                            # Círculo de fondo con gradiente
+                            Container(
+                                width=100,
+                                height=100,
+                                border_radius=ft.BorderRadius.all(50),
+                                gradient=ft.LinearGradient(
+                                    begin=ft.Alignment(-1, -1),
+                                    end=ft.Alignment(1, 1),
+                                    colors=[COLOR_EXITO_CLARO, "#A7F3D0"],
+                                ),
+                            ),
+                            # Icono check
+                            Container(
+                                content=Icon(icons.CHECK_ROUNDED, size=55, color=COLOR_EXITO),
+                                width=100,
+                                height=100,
+                                alignment=ft.Alignment(0, 0),
+                            ),
+                        ]),
+                        animate=ft.Animation(500, ft.AnimationCurve.BOUNCE_OUT),
                     ),
                     
                     Container(height=15),
                     
-                    # Info del ticket
-                    Container(
-                        content=Row([
-                            Column([
-                                Text("N° Ticket", size=10, color=COLOR_TEXTO_SEC),
-                                Text(f"#{id_ticket}", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
-                            ], horizontal_alignment=CrossAxisAlignment.CENTER, expand=True),
-                            Container(width=1, height=35, bgcolor=COLOR_BORDE),
-                            Column([
-                                Text("Posición", size=10, color=COLOR_TEXTO_SEC),
-                                Text(f"#{posicion}" if posicion else "1", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
-                            ], horizontal_alignment=CrossAxisAlignment.CENTER, expand=True),
-                            Container(width=1, height=35, bgcolor=COLOR_BORDE),
-                            Column([
-                                Text("Atención", size=10, color=COLOR_TEXTO_SEC),
-                                Text("En breve", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
-                            ], horizontal_alignment=CrossAxisAlignment.CENTER, expand=True),
-                        ]),
-                        border=ft.Border.all(1, COLOR_BORDE),
-                        border_radius=ft.BorderRadius.all(10),
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=12),
+                    Text(
+                        "¡Ticket Creado!",
+                        size=22,
+                        weight=FontWeight.BOLD,
+                        color=COLOR_EXITO,
                     ),
                     
-                    Container(height=8),
+                    Container(height=5),
                     
-                    # Fecha y hora
+                    Text(
+                        mensaje,
+                        size=13,
+                        color=COLOR_TEXTO_SEC,
+                    ),
+                    
+                    Container(height=20),
+                    
+                    # Tarjeta de turno
+                    Container(
+                        content=Column([
+                            Text("TU NÚMERO DE TURNO", size=10, color=COLOR_TEXTO_SEC, weight=FontWeight.W_500),
+                            Container(height=5),
+                            Row([
+                                Container(
+                                    content=Text(turno, size=48, weight=FontWeight.BOLD, color=color_turno),
+                                    animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                                ),
+                            ], alignment=MainAxisAlignment.CENTER),
+                            Container(height=5),
+                            Container(
+                                content=Row([
+                                    Icon(icono_estado, size=14, color=colors.WHITE),
+                                    Text(estado_texto, size=11, color=colors.WHITE, weight=FontWeight.W_500),
+                                ], spacing=5, alignment=MainAxisAlignment.CENTER),
+                                bgcolor=color_turno,
+                                border_radius=ft.BorderRadius.all(15),
+                                padding=ft.Padding.symmetric(horizontal=12, vertical=5),
+                            ),
+                        ], horizontal_alignment=CrossAxisAlignment.CENTER),
+                        bgcolor=COLOR_FONDO,
+                        border_radius=ft.BorderRadius.all(15),
+                        padding=ft.Padding.symmetric(horizontal=25, vertical=18),
+                        border=ft.Border.all(1, COLOR_BORDE),
+                    ),
+                    
+                    Container(height=15),
+                    
+                    # Info del ticket en grid
+                    Container(
+                        content=Row([
+                            # Columna 1: N° Ticket
+                            Container(
+                                content=Column([
+                                    Icon(icons.CONFIRMATION_NUMBER_ROUNDED, size=18, color=COLOR_PRIMARIO),
+                                    Text("N° Ticket", size=9, color=COLOR_TEXTO_SEC),
+                                    Text(f"#{id_ticket[:8]}..." if len(str(id_ticket)) > 8 else f"#{id_ticket}", 
+                                         size=11, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                                ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2),
+                                expand=True,
+                            ),
+                            Container(width=1, height=45, bgcolor=COLOR_BORDE),
+                            # Columna 2: Categoría
+                            Container(
+                                content=Column([
+                                    Icon(ICONOS_CATEGORIA.get(categoria, icons.HELP_OUTLINE), size=18, color=COLOR_SECUNDARIO),
+                                    Text("Categoría", size=9, color=COLOR_TEXTO_SEC),
+                                    Text(categoria[:10] + "..." if len(categoria) > 10 else categoria, 
+                                         size=11, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                                ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2),
+                                expand=True,
+                            ),
+                            Container(width=1, height=45, bgcolor=COLOR_BORDE),
+                            # Columna 3: Hora
+                            Container(
+                                content=Column([
+                                    Icon(icons.ACCESS_TIME_ROUNDED, size=18, color=COLOR_INFO),
+                                    Text("Hora", size=9, color=COLOR_TEXTO_SEC),
+                                    Text(datetime.now().strftime("%I:%M %p"), size=11, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                                ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2),
+                                expand=True,
+                            ),
+                        ]),
+                        border=ft.Border.all(1, COLOR_BORDE),
+                        border_radius=ft.BorderRadius.all(12),
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=12),
+                    ),
+                    
+                    Container(height=10),
+                    
+                    # Fecha
                     Row([
-                        Icon(icons.SCHEDULE, size=14, color=COLOR_TEXTO_SEC),
-                        Text(fecha_hora_actual, size=11, color=COLOR_TEXTO_SEC),
+                        Icon(icons.CALENDAR_TODAY_ROUNDED, size=12, color=COLOR_TEXTO_SEC),
+                        Text(fecha_hora_actual, size=10, color=COLOR_TEXTO_SEC),
                     ], spacing=5, alignment=MainAxisAlignment.CENTER),
                     
-                ], horizontal_alignment=CrossAxisAlignment.CENTER),
+                ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=0),
                 width=320,
-                padding=ft.Padding.all(5),
+                padding=ft.Padding.only(top=25, bottom=15, left=15, right=15),
             ),
             actions=[
                 Button(
                     content=Row([
-                        Icon(icons.THUMB_UP, color=colors.WHITE, size=16),
-                        Text("Entendido", color=colors.WHITE, weight=FontWeight.W_500),
+                        Icon(icons.CHECK_CIRCLE_ROUNDED, color=colors.WHITE, size=18),
+                        Text("Entendido", color=colors.WHITE, weight=FontWeight.W_600, size=14),
                     ], spacing=8, alignment=MainAxisAlignment.CENTER),
-                    bgcolor=COLOR_PRIMARIO,
-                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)),
-                    width=150,
-                    height=42,
+                    bgcolor=COLOR_EXITO,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=12),
+                        overlay_color=colors.WHITE24,
+                    ),
+                    width=180,
+                    height=48,
                     on_click=lambda e: self._cerrar_dialogo(),
                 ),
             ],
             actions_alignment=MainAxisAlignment.CENTER,
+            shape=ft.RoundedRectangleBorder(radius=25),
         )
         
         self.page.overlay.append(dialogo)
         dialogo.open = True
         self.page.update()
     
-    def _mostrar_error(self, mensaje: str) -> None:
-        """Muestra un diálogo de error."""
-        dialogo = AlertDialog(
-            modal=True,
-            title=Row([
-                Icon(icons.ERROR_OUTLINE, color=COLOR_ERROR, size=24),
-                Text("Revisa el formulario", color=COLOR_ERROR, weight=FontWeight.W_600),
-            ], spacing=8),
-            content=Container(
-                content=Text(mensaje, size=14, color=COLOR_TEXTO),
-                padding=ft.Padding.only(top=5),
-            ),
-            actions=[
-                ft.TextButton(
-                    "Corregir",
-                    on_click=lambda e: self._cerrar_dialogo(),
-                ),
-            ],
-            actions_alignment=MainAxisAlignment.END,
+    def _mostrar_error(self, mensaje: str, titulo: str = "¡Ups! Algo salió mal") -> None:
+        """Muestra un diálogo de error profesional con animaciones."""
+        # Detectar tipo de error para personalizar
+        if "conexión" in mensaje.lower() or "servidor" in mensaje.lower() or "red" in mensaje.lower():
+            tipo = "conexion"
+            titulo = "Error de Conexión"
+        elif "formulario" in mensaje.lower() or "campo" in mensaje.lower() or "selecciona" in mensaje.lower():
+            tipo = "advertencia"
+            titulo = "Revisa el formulario"
+        else:
+            tipo = "error"
+        
+        dialogo = self._crear_dialogo_profesional(
+            tipo=tipo,
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="Entendido"
         )
         self.page.overlay.append(dialogo)
         dialogo.open = True
         self.page.update()
+    
+    def _mostrar_error_conexion(self, mensaje: str = "No se pudo conectar con el servidor") -> None:
+        """Muestra un diálogo específico de error de conexión."""
+        config = DIALOGO_TIPOS["conexion"]
+        
+        dialogo = AlertDialog(
+            modal=True,
+            content=Container(
+                content=Column([
+                    # Icono animado
+                    Container(
+                        content=Container(
+                            content=ft.Stack([
+                                Container(
+                                    content=Icon(icons.CLOUD_OFF_ROUNDED, size=40, color=config["color"]),
+                                    width=80,
+                                    height=80,
+                                    alignment=ft.Alignment(0, 0),
+                                ),
+                                Container(
+                                    content=Icon(icons.WIFI_OFF_ROUNDED, size=20, color=COLOR_ERROR),
+                                    width=80,
+                                    height=80,
+                                    alignment=ft.Alignment(0.5, 0.5),
+                                ),
+                            ]),
+                            bgcolor=config["color_fondo"],
+                            border_radius=ft.BorderRadius.all(40),
+                            width=80,
+                            height=80,
+                        ),
+                    ),
+                    Container(height=15),
+                    Text("Sin Conexión", size=18, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    Container(height=8),
+                    Text(
+                        mensaje,
+                        size=13,
+                        color=COLOR_TEXTO_SEC,
+                        text_align=TextAlign.CENTER,
+                    ),
+                    Container(height=15),
+                    # Sugerencias
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.LIGHTBULB_OUTLINE, size=14, color=COLOR_ADVERTENCIA),
+                                Text("Sugerencias:", size=12, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                            ], spacing=5),
+                            Container(height=5),
+                            Text("• Verifica tu conexión de red", size=11, color=COLOR_TEXTO_SEC),
+                            Text("• Revisa la configuración del servidor", size=11, color=COLOR_TEXTO_SEC),
+                            Text("• Contacta al administrador de IT", size=11, color=COLOR_TEXTO_SEC),
+                        ]),
+                        bgcolor=COLOR_ADVERTENCIA_CLARO,
+                        border_radius=ft.BorderRadius.all(10),
+                        padding=ft.Padding.all(12),
+                    ),
+                ], horizontal_alignment=CrossAxisAlignment.CENTER),
+                width=300,
+                padding=ft.Padding.all(20),
+            ),
+            actions=[
+                Button(
+                    content=Row([
+                        Icon(icons.SETTINGS, color=COLOR_PRIMARIO, size=16),
+                        Text("Configurar", color=COLOR_PRIMARIO, weight=FontWeight.W_500),
+                    ], spacing=5, alignment=MainAxisAlignment.CENTER),
+                    bgcolor=colors.TRANSPARENT,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=10),
+                        side=ft.BorderSide(1, COLOR_PRIMARIO),
+                    ),
+                    height=42,
+                    on_click=lambda e: self._ir_a_configuracion_desde_error(),
+                ),
+                Button(
+                    content=Row([
+                        Icon(icons.REFRESH, color=colors.WHITE, size=16),
+                        Text("Reintentar", color=colors.WHITE, weight=FontWeight.W_500),
+                    ], spacing=5, alignment=MainAxisAlignment.CENTER),
+                    bgcolor=COLOR_PRIMARIO,
+                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)),
+                    height=42,
+                    on_click=lambda e: self._reintentar_conexion_desde_error(),
+                ),
+            ],
+            actions_alignment=MainAxisAlignment.CENTER,
+            shape=ft.RoundedRectangleBorder(radius=20),
+        )
+        
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    def _ir_a_configuracion_desde_error(self):
+        """Cierra el diálogo y abre configuración."""
+        self._cerrar_dialogo()
+        self._abrir_configuracion()
+    
+    def _reintentar_conexion_desde_error(self):
+        """Cierra el diálogo y reintenta la conexión."""
+        self._cerrar_dialogo()
+        self._mostrar_carga("Reintentando conexión...")
+        
+        def reintentar():
+            import time
+            time.sleep(0.5)
+            self._ocultar_carga()
+            self._inicializar_servidor()
+            self._actualizar_estado_enlace_ui()
+        
+        import threading
+        threading.Thread(target=reintentar, daemon=True).start()
     
     def _cerrar_dialogo(self) -> None:
         """Cierra el diálogo activo."""
@@ -1665,11 +2158,23 @@ class AppEmisora:
             self.page.update()
     
     async def _enviar_ticket_async(self) -> None:
-        """Proceso asíncrono de envío."""
+        """Proceso asíncrono de envío con animaciones mejoradas."""
         try:
+            # Mostrar overlay de carga
+            self._mostrar_carga("Creando tu ticket...")
+            
+            await asyncio.sleep(0.3)  # Pequeña pausa para mostrar animación
+            
+            # Actualizar mensaje de carga
+            if self.texto_carga:
+                self.texto_carga.value = "Verificando disponibilidad..."
+                self.page.update()
+            
             # Actualizar estado
             self.tecnicos_disponibles = self.gestor.obtener_tecnicos_disponibles()
             self.hay_disponible = self.gestor.hay_tecnico_disponible()
+            
+            await asyncio.sleep(0.3)
             
             # Datos del ticket
             datos_ticket = {
@@ -1682,6 +2187,11 @@ class AppEmisora:
             }
             
             ticket = None
+            
+            # Actualizar mensaje
+            if self.texto_carga:
+                self.texto_carga.value = "Enviando al servidor..."
+                self.page.update()
             
             # Intentar enviar por red si está enlazado
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
@@ -1696,21 +2206,33 @@ class AppEmisora:
                         print(f"[CLIENTE] Ticket enviado por red: {ticket.get('ID_TICKET', 'N/A')}")
                 except Exception as e:
                     print(f"[CLIENTE] Error de red, guardando local: {e}")
-                    # Si falla la red, guardar localmente
+                    if self.texto_carga:
+                        self.texto_carga.value = "Guardando localmente..."
+                        self.page.update()
                     ticket = self.gestor.crear_ticket(**datos_ticket)
                     print(f"[CLIENTE] Ticket guardado localmente: {ticket.get('ID_TICKET', 'N/A')}")
             else:
-                # No hay servidor, crear localmente
+                if self.texto_carga:
+                    self.texto_carga.value = "Guardando ticket..."
+                    self.page.update()
                 ticket = self.gestor.crear_ticket(**datos_ticket)
                 print(f"[CLIENTE] Ticket creado localmente (sin servidor): {ticket.get('ID_TICKET', 'N/A')}")
             
-            await asyncio.sleep(0.8)
+            # Mensaje final
+            if self.texto_carga:
+                self.texto_carga.value = "¡Ticket creado!"
+                self.page.update()
             
+            await asyncio.sleep(0.5)
+            
+            # Ocultar overlay y restaurar botón
+            self._ocultar_carga()
             self.progress_ring.visible = False
             self.btn_enviar.disabled = False
-            self._enviando = False  # Resetear flag
+            self._enviando = False
             self.page.update()
             
+            # Mostrar diálogo de turno
             self._mostrar_dialogo_turno(ticket)
             
             # Reconstruir UI para mostrar el ticket activo
@@ -1719,18 +2241,24 @@ class AppEmisora:
             self.page.update()
             
         except PermissionError:
+            self._ocultar_carga()
             self.progress_ring.visible = False
             self.btn_enviar.disabled = False
             self._enviando = False
             self.page.update()
-            self._mostrar_error("El archivo de datos está en uso. Ciérralo e intenta de nuevo.")
+            self._mostrar_error(
+                "El archivo de datos está siendo usado por otro programa. "
+                "Ciérralo e intenta nuevamente.",
+                titulo="Archivo en uso"
+            )
             
         except Exception as e:
+            self._ocultar_carga()
             self.progress_ring.visible = False
             self.btn_enviar.disabled = False
             self._enviando = False
             self.page.update()
-            self._mostrar_error(f"Error: {str(e)}")
+            self._mostrar_error(f"Ocurrió un error inesperado: {str(e)}")
     
     def _enviar_ticket(self, e) -> None:
         """Manejador del botón enviar."""
@@ -1741,17 +2269,33 @@ class AppEmisora:
         # Verificar estado de enlace
         if not self.enlazado:
             if self.estado_enlace == "pendiente":
-                self._mostrar_error("⏳ Espera a que el administrador apruebe tu solicitud de enlace")
+                self._mostrar_advertencia(
+                    "Tu solicitud de enlace está pendiente de aprobación. "
+                    "Un administrador debe aprobar tu equipo antes de poder enviar tickets.",
+                    titulo="Esperando aprobación"
+                )
             elif self.estado_enlace == "rechazado":
-                self._mostrar_error("❌ Tu solicitud fue rechazada. Contacta al administrador.")
+                self._mostrar_error(
+                    "Tu solicitud de enlace fue rechazada por el administrador. "
+                    "Contacta al departamento de IT para más información.",
+                    titulo="Acceso denegado"
+                )
+            elif self.estado_enlace == "revocado":
+                self._mostrar_error(
+                    "Tu acceso ha sido revocado por el administrador. "
+                    "Contacta al departamento de IT si necesitas recuperar el acceso.",
+                    titulo="Acceso revocado"
+                )
             else:
-                self._mostrar_error("🔗 Debes enlazar tu equipo con el servidor primero")
+                self._mostrar_error_conexion(
+                    "Debes conectarte al servidor y enlazar tu equipo antes de crear tickets."
+                )
             return
         
         es_valido, error = self._validar_formulario()
         
         if not es_valido:
-            self._mostrar_error(error)
+            self._mostrar_advertencia(error, titulo="Revisa el formulario")
             return
         
         # Marcar como enviando
