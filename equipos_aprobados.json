@@ -1,0 +1,22 @@
+{
+  "04:7c:16:e0:f5:56": {
+    "mac_address": "04:7c:16:e0:f5:56",
+    "hostname": "MANTTO-8",
+    "usuario_ad": "MANTTO8",
+    "nombre_equipo": "MANTTO-8",
+    "ip_address": "192.168.1.14",
+    "fecha_solicitud": "2026-02-26T20:49:37.124074",
+    "fecha_aprobacion": "2026-02-26T20:50:03.424584",
+    "estado": "aprobado"
+  },
+  "c4:75:ab:fd:46:34": {
+    "mac_address": "c4:75:ab:fd:46:34",
+    "hostname": "DESKTOP-CVIIIJJ",
+    "usuario_ad": "PROTECNICA",
+    "nombre_equipo": "DESKTOP-CVIIIJJ",
+    "ip_address": "192.168.1.22",
+    "fecha_solicitud": "2026-03-02T11:18:45.371151",
+    "fecha_aprobacion": "2026-03-02T11:19:06.351041",
+    "estado": "aprobado"
+  }
+}
