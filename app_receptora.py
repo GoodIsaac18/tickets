@@ -78,9 +78,14 @@ COLOR_ACENTO = "#00D9FF"
 COLOR_TEXTO = "#FFFFFF"
 COLOR_TEXTO_SEC = "#A0A0A0"
 COLOR_EXITO = "#00E676"
+COLOR_EXITO_CLARO = "#1B3B2F"       # Verde oscuro para fondo
 COLOR_ADVERTENCIA = "#FFD600"
+COLOR_ADVERTENCIA_CLARO = "#3D3A1A" # Amarillo oscuro para fondo
 COLOR_ERROR = "#FF5252"
+COLOR_ERROR_CLARO = "#3D1A1A"       # Rojo oscuro para fondo
 COLOR_INFO = "#00B0FF"
+COLOR_INFO_CLARO = "#1A2E3D"        # Azul oscuro para fondo
+COLOR_BORDE = "#2A2A3E"             # Borde para modo oscuro
 
 # Colores de estado
 COLOR_DISPONIBLE = "#00E676"
@@ -106,6 +111,49 @@ COLORES_CATEGORIAS = {
 
 
 # =============================================================================
+# CONSTANTES DE DIÁLOGOS PROFESIONALES
+# =============================================================================
+DIALOGO_TIPOS = {
+    "error": {
+        "icono": icons.ERROR_ROUNDED,
+        "color": COLOR_ERROR,
+        "color_fondo": COLOR_ERROR_CLARO,
+        "titulo": "¡Error!"
+    },
+    "exito": {
+        "icono": icons.CHECK_CIRCLE_ROUNDED,
+        "color": COLOR_EXITO,
+        "color_fondo": COLOR_EXITO_CLARO,
+        "titulo": "¡Completado!"
+    },
+    "advertencia": {
+        "icono": icons.WARNING_ROUNDED,
+        "color": COLOR_ADVERTENCIA,
+        "color_fondo": COLOR_ADVERTENCIA_CLARO,
+        "titulo": "Atención"
+    },
+    "info": {
+        "icono": icons.INFO_ROUNDED,
+        "color": COLOR_INFO,
+        "color_fondo": COLOR_INFO_CLARO,
+        "titulo": "Información"
+    },
+    "confirmar": {
+        "icono": icons.HELP_ROUNDED,
+        "color": COLOR_ACENTO,
+        "color_fondo": COLOR_SUPERFICIE_2,
+        "titulo": "Confirmar acción"
+    },
+    "cargando": {
+        "icono": icons.HOURGLASS_TOP_ROUNDED,
+        "color": COLOR_PRIMARIO,
+        "color_fondo": COLOR_SUPERFICIE,
+        "titulo": "Procesando..."
+    }
+}
+
+
+# =============================================================================
 # CLASE PRINCIPAL
 # =============================================================================
 
@@ -120,6 +168,11 @@ class PanelAdminIT:
         self.auto_refresh = True
         self.servidor_ip = None
         self.servidor_puerto = None
+        
+        # Sistema de overlay de carga
+        self.overlay_carga: Optional[Container] = None
+        self.texto_carga: Optional[Text] = None
+        self._carga_activa: bool = False
         
         self._configurar_pagina()
         self._construir_ui()
@@ -605,15 +658,43 @@ class PanelAdminIT:
         ], scroll=ScrollMode.AUTO, expand=True)
     
     def _mostrar_dialogo_agregar_tecnico(self):
-        """Muestra diálogo para agregar un nuevo técnico."""
-        txt_nombre = TextField(label="Nombre completo", width=350)
-        txt_especialidad = TextField(label="Especialidad", width=350)
-        txt_telefono = TextField(label="Teléfono (opcional)", width=350)
-        txt_email = TextField(label="Email (opcional)", width=350)
+        """Muestra diálogo para agregar un nuevo técnico - Versión mejorada."""
+        txt_nombre = TextField(
+            label="Nombre completo",
+            prefix_icon=icons.PERSON_ROUNDED,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_ACENTO,
+            cursor_color=COLOR_ACENTO,
+            width=350
+        )
+        txt_especialidad = TextField(
+            label="Especialidad",
+            prefix_icon=icons.WORK_ROUNDED,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_ACENTO,
+            cursor_color=COLOR_ACENTO,
+            width=350
+        )
+        txt_telefono = TextField(
+            label="Teléfono (opcional)",
+            prefix_icon=icons.PHONE_ROUNDED,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_ACENTO,
+            cursor_color=COLOR_ACENTO,
+            width=350
+        )
+        txt_email = TextField(
+            label="Email (opcional)",
+            prefix_icon=icons.EMAIL_ROUNDED,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_ACENTO,
+            cursor_color=COLOR_ACENTO,
+            width=350
+        )
         
         def agregar(e):
             if not txt_nombre.value or not txt_especialidad.value:
-                self._mostrar_snackbar("Nombre y especialidad son requeridos", COLOR_ERROR)
+                self._mostrar_advertencia("El nombre y especialidad son campos obligatorios")
                 return
             
             self.gestor.agregar_tecnico(
@@ -622,8 +703,8 @@ class PanelAdminIT:
                 telefono=txt_telefono.value or "",
                 email=txt_email.value or ""
             )
-            self._mostrar_snackbar("Técnico agregado correctamente", COLOR_EXITO)
             self.page.pop_dialog()
+            self._mostrar_snackbar(f"✓ Técnico {txt_nombre.value} agregado", COLOR_EXITO)
             self._refrescar_vista()
         
         def cerrar_dialogo(e):
@@ -631,21 +712,46 @@ class PanelAdminIT:
         
         dialogo = AlertDialog(
             modal=True,
-            title=Text("Agregar Nuevo Técnico", weight=FontWeight.BOLD),
+            bgcolor=COLOR_SUPERFICIE,
+            title=Row([
+                Container(
+                    content=Icon(icons.PERSON_ADD_ROUNDED, size=24, color=COLOR_EXITO),
+                    bgcolor=COLOR_EXITO_CLARO,
+                    border_radius=ft.BorderRadius.all(8),
+                    padding=8,
+                ),
+                Text("Agregar Nuevo Técnico", weight=FontWeight.BOLD, color=COLOR_TEXTO),
+            ], spacing=12),
             content=Container(
                 content=Column([
+                    Container(height=10),
                     txt_nombre,
                     txt_especialidad,
                     txt_telefono,
                     txt_email
                 ], spacing=15),
                 width=400,
-                height=280
+                height=320
             ),
             actions=[
-                ft.TextButton("Cancelar", on_click=lambda e: cerrar_dialogo(e)),
-                ft.Button("Agregar", bgcolor=COLOR_EXITO, color=colors.WHITE, on_click=lambda e: agregar(e))
-            ]
+                ft.TextButton(
+                    "Cancelar",
+                    on_click=lambda e: cerrar_dialogo(e),
+                    style=ft.ButtonStyle(color=COLOR_TEXTO_SEC)
+                ),
+                ft.ElevatedButton(
+                    content=Row([
+                        Icon(icons.PERSON_ADD_ROUNDED, color=colors.WHITE, size=18),
+                        Text("Agregar Técnico", color=colors.WHITE, weight=FontWeight.W_600),
+                    ], spacing=8),
+                    bgcolor=COLOR_EXITO,
+                    style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)),
+                    height=42,
+                    on_click=lambda e: agregar(e)
+                )
+            ],
+            actions_alignment=MainAxisAlignment.END,
+            shape=ft.RoundedRectangleBorder(radius=16),
         )
         
         self.page.show_dialog(dialogo)
@@ -750,33 +856,81 @@ class PanelAdminIT:
     def _confirmar_eliminar_tecnico(self, id_tecnico: str, nombre: str):
         """Muestra diálogo de confirmación para eliminar un técnico."""
         def eliminar(e):
+            self._cerrar_dialogo(None)
+            self._mostrar_carga("Eliminando técnico...")
+            
             if self.gestor.eliminar_tecnico(id_tecnico):
-                self._mostrar_snackbar(f"Técnico {nombre} eliminado", COLOR_EXITO)
+                self._ocultar_carga()
+                self._mostrar_exito(
+                    f"Técnico Eliminado",
+                    f"{nombre} ha sido eliminado del sistema correctamente."
+                )
             else:
-                self._mostrar_snackbar("No se pudo eliminar (puede estar ocupado)", COLOR_ERROR)
-            self.page.pop_dialog()
+                self._ocultar_carga()
+                self._mostrar_error(
+                    "No se pudo eliminar",
+                    "El técnico puede estar ocupado con un ticket activo."
+                )
             self._refrescar_vista()
         
-        def cerrar_dialogo(e):
-            self.page.pop_dialog()
-        
+        # Diálogo profesional de confirmación
         dialogo = AlertDialog(
             modal=True,
-            title=Text("Confirmar Eliminación", weight=FontWeight.BOLD, color=COLOR_ERROR),
+            shape=RoundedRectangleBorder(radius=16),
+            bgcolor=COLOR_SUPERFICIE,
+            title=Row([
+                Container(
+                    content=Icon(icons.DELETE_FOREVER, size=28, color=colors.WHITE),
+                    bgcolor=COLOR_ERROR,
+                    padding=8,
+                    border_radius=8
+                ),
+                Text("Confirmar Eliminación", weight=FontWeight.BOLD, color=COLOR_ERROR, size=18)
+            ], spacing=12),
             content=Container(
                 content=Column([
-                    Icon(icons.WARNING, size=50, color=COLOR_ADVERTENCIA),
-                    Text(f"¿Estás seguro de eliminar al técnico?", color=COLOR_TEXTO),
-                    Text(f"{nombre}", weight=FontWeight.BOLD, color=COLOR_ACENTO, size=18),
-                    Text("Esta acción no se puede deshacer.", size=12, color=COLOR_TEXTO_SEC)
-                ], spacing=10, horizontal_alignment=CrossAxisAlignment.CENTER),
-                width=300,
-                height=180
+                    Container(
+                        content=Icon(icons.WARNING_AMBER_ROUNDED, size=60, color=COLOR_ADVERTENCIA),
+                        alignment=alignment.center,
+                        animate_opacity=300
+                    ),
+                    Container(height=10),
+                    Text("¿Estás seguro de eliminar a este técnico?", 
+                         color=COLOR_TEXTO, size=14, text_align=TextAlign.CENTER),
+                    Container(
+                        content=Text(nombre, weight=FontWeight.BOLD, color=COLOR_ACENTO, size=20),
+                        padding=10,
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        border_radius=8,
+                        alignment=alignment.center
+                    ),
+                    Container(height=5),
+                    Row([
+                        Icon(icons.INFO_OUTLINE, size=14, color=COLOR_ERROR_CLARO),
+                        Text("Esta acción no se puede deshacer", size=12, color=COLOR_ERROR_CLARO)
+                    ], alignment=MainAxisAlignment.CENTER, spacing=5)
+                ], spacing=8, horizontal_alignment=CrossAxisAlignment.CENTER),
+                width=340,
+                padding=10
             ),
             actions=[
-                ft.TextButton("Cancelar", on_click=lambda e: cerrar_dialogo(e)),
-                ft.Button("Eliminar", bgcolor=COLOR_ERROR, color=colors.WHITE, on_click=lambda e: eliminar(e))
-            ]
+                ft.TextButton(
+                    content=Row([
+                        Icon(icons.CLOSE, size=18),
+                        Text("Cancelar")
+                    ], spacing=5),
+                    on_click=self._cerrar_dialogo
+                ),
+                ft.ElevatedButton(
+                    content=Row([
+                        Icon(icons.DELETE, size=18, color=colors.WHITE),
+                        Text("Eliminar", color=colors.WHITE)
+                    ], spacing=5),
+                    bgcolor=COLOR_ERROR,
+                    on_click=lambda e: eliminar(e)
+                )
+            ],
+            actions_alignment=MainAxisAlignment.END
         )
         
         self.page.show_dialog(dialogo)
@@ -803,7 +957,7 @@ class PanelAdminIT:
         cola = self.gestor.obtener_tickets_en_cola()
         
         if cola.empty:
-            self._mostrar_snackbar("No hay tickets en cola", COLOR_ADVERTENCIA)
+            self._mostrar_advertencia("Sin tickets en cola", "No hay tickets pendientes para asignar.")
             return
         
         opciones = [
@@ -814,34 +968,82 @@ class PanelAdminIT:
         dd_tickets = Dropdown(
             label="Seleccionar Ticket",
             options=opciones,
-            width=400
+            width=380,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            prefix_icon=icons.CONFIRMATION_NUMBER
         )
         
         def asignar(e):
             if dd_tickets.value:
+                self._cerrar_dialogo(None)
+                self._mostrar_carga("Asignando ticket...")
+                
                 self.gestor.asignar_ticket_a_tecnico(dd_tickets.value, id_tecnico)
-                self._mostrar_snackbar("Ticket asignado correctamente", COLOR_EXITO)
-                self.page.pop_dialog()
+                
+                self._ocultar_carga()
+                self._mostrar_exito(
+                    "Ticket Asignado",
+                    f"El ticket #{dd_tickets.value} ha sido asignado correctamente."
+                )
                 self._refrescar_vista()
-        
-        def cerrar_dialogo(e):
-            self.page.pop_dialog()
+            else:
+                self._mostrar_advertencia("Selecciona un ticket", "Debes seleccionar un ticket de la lista.")
         
         dialogo = AlertDialog(
             modal=True,
-            title=Text("Asignar Ticket"),
+            shape=RoundedRectangleBorder(radius=16),
+            bgcolor=COLOR_SUPERFICIE,
+            title=Row([
+                Container(
+                    content=Icon(icons.ASSIGNMENT_IND, size=28, color=colors.WHITE),
+                    bgcolor=COLOR_PRIMARIO,
+                    padding=8,
+                    border_radius=8
+                ),
+                Text("Asignar Ticket", weight=FontWeight.BOLD, color=COLOR_TEXTO, size=18)
+            ], spacing=12),
             content=Container(
                 content=Column([
-                    Text("Selecciona un ticket de la cola para asignar:", color=COLOR_TEXTO),
-                    dd_tickets
-                ], spacing=20),
-                width=450,
-                height=150
+                    Row([
+                        Icon(icons.INFO_OUTLINE, size=16, color=COLOR_INFO),
+                        Text("Selecciona un ticket de la cola para asignar:", 
+                             color=COLOR_TEXTO, size=13)
+                    ], spacing=8),
+                    Container(height=5),
+                    dd_tickets,
+                    Container(height=5),
+                    Container(
+                        content=Row([
+                            Icon(icons.QUEUE, size=14, color=COLOR_TEXTO_SEC),
+                            Text(f"{len(cola)} tickets en cola", size=12, color=COLOR_TEXTO_SEC)
+                        ], spacing=5),
+                        padding=8,
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        border_radius=8
+                    )
+                ], spacing=10),
+                width=420,
+                padding=10
             ),
             actions=[
-                ft.TextButton("Cancelar", on_click=lambda e: cerrar_dialogo(e)),
-                ft.Button("Asignar", bgcolor=COLOR_PRIMARIO, color=colors.WHITE, on_click=lambda e: asignar(e))
-            ]
+                ft.TextButton(
+                    content=Row([
+                        Icon(icons.CLOSE, size=18),
+                        Text("Cancelar")
+                    ], spacing=5),
+                    on_click=self._cerrar_dialogo
+                ),
+                ft.ElevatedButton(
+                    content=Row([
+                        Icon(icons.CHECK, size=18, color=colors.WHITE),
+                        Text("Asignar", color=colors.WHITE)
+                    ], spacing=5),
+                    bgcolor=COLOR_PRIMARIO,
+                    on_click=lambda e: asignar(e)
+                )
+            ],
+            actions_alignment=MainAxisAlignment.END
         )
         
         self.page.show_dialog(dialogo)
@@ -1290,80 +1492,146 @@ class PanelAdminIT:
         else:
             fecha_cierre = str(fecha_cierre)[:19] if fecha_cierre else "-"
         
-        def cerrar_dialogo(e):
-            self.page.pop_dialog()
-        
         dialogo = AlertDialog(
             modal=True,
+            shape=RoundedRectangleBorder(radius=16),
+            bgcolor=COLOR_SUPERFICIE,
             title=Row([
-                Text(f"Ticket #{ticket.get('ID_TICKET', '')}", weight=FontWeight.BOLD),
+                Container(
+                    content=Icon(icons.HISTORY, size=24, color=colors.WHITE),
+                    bgcolor=COLOR_EXITO,
+                    padding=8,
+                    border_radius=8
+                ),
+                Text(f"Ticket #{ticket.get('ID_TICKET', '')}", weight=FontWeight.BOLD, size=18, color=COLOR_TEXTO),
                 Container(
                     content=Row([
-                        Icon(icons.LOCK, size=14, color=colors.WHITE),
+                        Icon(icons.CHECK_CIRCLE, size=14, color=colors.WHITE),
                         Text("Cerrado", size=12, color=colors.WHITE)
                     ], spacing=5),
                     bgcolor=COLOR_EXITO,
                     padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                     border_radius=ft.BorderRadius.all(10)
                 )
-            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+            ], spacing=10, alignment=MainAxisAlignment.START),
             content=Container(
                 content=Column([
-                    Row([
-                        Text("Usuario:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(str(ticket.get("USUARIO_AD", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("Equipo:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(str(ticket.get("HOSTNAME", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("MAC:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(str(ticket.get("MAC_ADDRESS", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("Categoría:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(str(ticket.get("CATEGORIA", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("Prioridad:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(str(ticket.get("PRIORIDAD", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("Técnico:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(str(ticket.get("TECNICO_ASIGNADO", "-")), color=COLOR_ACENTO)
-                    ]),
-                    Divider(color=COLOR_SUPERFICIE_2),
-                    Row([
-                        Text("Fecha Apertura:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(fecha_apertura, color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("Fecha Cierre:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC, width=120),
-                        Text(fecha_cierre, color=COLOR_EXITO)
-                    ]),
-                    Divider(color=COLOR_SUPERFICIE_2),
-                    Text("Descripción:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
+                    # Info del usuario
                     Container(
-                        content=Text(str(ticket.get("DESCRIPCION", ""))[:300], color=COLOR_TEXTO, size=12),
+                        content=Column([
+                            Row([
+                                Icon(icons.PERSON, size=16, color=COLOR_ACENTO),
+                                Text("Información del Ticket", weight=FontWeight.BOLD, color=COLOR_ACENTO)
+                            ], spacing=8),
+                            Container(height=5),
+                            Row([
+                                Text("Usuario:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=110),
+                                Text(str(ticket.get("USUARIO_AD", "")), color=COLOR_TEXTO)
+                            ]),
+                            Row([
+                                Text("Equipo:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=110),
+                                Text(str(ticket.get("HOSTNAME", "")), color=COLOR_TEXTO)
+                            ]),
+                            Row([
+                                Text("MAC:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=110),
+                                Text(str(ticket.get("MAC_ADDRESS", "")), color=COLOR_TEXTO, size=12)
+                            ]),
+                            Row([
+                                Text("Categoría:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=110),
+                                Container(
+                                    content=Text(str(ticket.get("CATEGORIA", "")), size=11, color=colors.WHITE),
+                                    bgcolor=COLOR_INFO,
+                                    padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+                                    border_radius=5
+                                )
+                            ]),
+                            Row([
+                                Text("Prioridad:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=110),
+                                Text(str(ticket.get("PRIORIDAD", "")), color=COLOR_TEXTO)
+                            ]),
+                            Row([
+                                Text("Técnico:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=110),
+                                Row([
+                                    Icon(icons.ENGINEERING, size=14, color=COLOR_ACENTO),
+                                    Text(str(ticket.get("TECNICO_ASIGNADO", "-")), color=COLOR_ACENTO, weight=FontWeight.W_500)
+                                ], spacing=5)
+                            ])
+                        ]),
                         bgcolor=COLOR_SUPERFICIE_2,
-                        padding=10,
-                        border_radius=ft.BorderRadius.all(5)
+                        padding=12,
+                        border_radius=10
                     ),
-                    Text("Notas de Resolución:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
+                    
+                    # Fechas
                     Container(
-                        content=Text(str(ticket.get("NOTAS_RESOLUCION", "Sin notas")) or "Sin notas", color=COLOR_TEXTO, size=12),
+                        content=Row([
+                            Column([
+                                Row([
+                                    Icon(icons.CALENDAR_TODAY, size=14, color=COLOR_TEXTO_SEC),
+                                    Text("Apertura", size=11, color=COLOR_TEXTO_SEC)
+                                ], spacing=5),
+                                Text(fecha_apertura, size=12, color=COLOR_TEXTO)
+                            ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2),
+                            Icon(icons.ARROW_FORWARD, size=20, color=COLOR_EXITO),
+                            Column([
+                                Row([
+                                    Icon(icons.EVENT_AVAILABLE, size=14, color=COLOR_EXITO),
+                                    Text("Cierre", size=11, color=COLOR_EXITO)
+                                ], spacing=5),
+                                Text(fecha_cierre, size=12, color=COLOR_EXITO)
+                            ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2)
+                        ], alignment=MainAxisAlignment.SPACE_AROUND),
                         bgcolor=COLOR_SUPERFICIE_2,
-                        padding=10,
-                        border_radius=ft.BorderRadius.all(5)
+                        padding=12,
+                        border_radius=10
+                    ),
+                    
+                    # Descripción
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.DESCRIPTION, size=16, color=COLOR_INFO),
+                                Text("Descripción", weight=FontWeight.BOLD, color=COLOR_INFO)
+                            ], spacing=8),
+                            Container(height=3),
+                            Text(str(ticket.get("DESCRIPCION", ""))[:300], color=COLOR_TEXTO, size=12)
+                        ]),
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        padding=12,
+                        border_radius=10
+                    ),
+                    
+                    # Notas de resolución
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.TASK_ALT, size=16, color=COLOR_EXITO),
+                                Text("Notas de Resolución", weight=FontWeight.BOLD, color=COLOR_EXITO)
+                            ], spacing=8),
+                            Container(height=3),
+                            Text(str(ticket.get("NOTAS_RESOLUCION", "Sin notas")) or "Sin notas", 
+                                 color=COLOR_TEXTO, size=12)
+                        ]),
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        padding=12,
+                        border_radius=10
                     )
-                ], spacing=8, scroll=ScrollMode.AUTO),
-                width=450,
-                height=450
+                ], spacing=10, scroll=ScrollMode.AUTO),
+                width=460,
+                height=480,
+                padding=5
             ),
             actions=[
-                ft.Button("Cerrar", bgcolor=COLOR_SUPERFICIE_3, color=colors.WHITE, on_click=lambda e: cerrar_dialogo(e))
-            ]
+                ft.ElevatedButton(
+                    content=Row([
+                        Icon(icons.CLOSE, size=18, color=colors.WHITE),
+                        Text("Cerrar", color=colors.WHITE)
+                    ], spacing=5),
+                    bgcolor=COLOR_SUPERFICIE_3,
+                    on_click=self._cerrar_dialogo
+                )
+            ],
+            actions_alignment=MainAxisAlignment.END
         )
         
         self.page.show_dialog(dialogo)
@@ -2315,6 +2583,14 @@ class PanelAdminIT:
             "Cerrado": COLOR_EXITO
         }.get(estado, COLOR_TEXTO_SEC)
         
+        icono_estado = {
+            "Abierto": icons.FIBER_NEW,
+            "En Cola": icons.QUEUE,
+            "En Proceso": icons.ENGINEERING,
+            "En Espera": icons.PAUSE_CIRCLE,
+            "Cerrado": icons.CHECK_CIRCLE
+        }.get(estado, icons.HELP)
+        
         # Estados sin "Cerrado" para el dropdown (una vez cerrado no se puede reabrir)
         estados_disponibles = [e for e in ESTADOS_TICKET]
         
@@ -2323,7 +2599,10 @@ class PanelAdminIT:
             label="Estado",
             value=estado,
             options=[dropdown.Option(e) for e in estados_disponibles],
-            width=200
+            width=200,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            prefix_icon=icons.FLAG
         )
         
         txt_notas = TextField(
@@ -2332,68 +2611,136 @@ class PanelAdminIT:
             multiline=True,
             min_lines=3,
             max_lines=5,
-            width=300
+            width=380,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            prefix_icon=icons.NOTES
         )
-        
-        def cerrar_dialogo(e):
-            self.page.pop_dialog()
         
         def guardar_cambios(e):
             try:
+                self._cerrar_dialogo(None)
+                self._mostrar_carga("Guardando cambios...")
+                
                 self.gestor.actualizar_ticket(
                     ticket.get("ID_TICKET", ""),
                     estado=dd_estado.value,
                     notas_resolucion=txt_notas.value
                 )
-                self._mostrar_snackbar("Ticket actualizado", COLOR_EXITO)
-                self.page.pop_dialog()
+                
+                self._ocultar_carga()
+                self._mostrar_exito("Ticket actualizado", f"El ticket #{ticket.get('ID_TICKET', '')} se actualizó correctamente.")
                 self._refrescar_vista()
             except ValueError as ex:
-                self._mostrar_snackbar(str(ex), COLOR_ERROR)
+                self._ocultar_carga()
+                self._mostrar_error("Error al actualizar", str(ex))
         
         dialogo = AlertDialog(
             modal=True,
+            shape=RoundedRectangleBorder(radius=16),
+            bgcolor=COLOR_SUPERFICIE,
             title=Row([
-                Text(f"Ticket #{ticket.get('ID_TICKET', '')}", weight=FontWeight.BOLD),
                 Container(
-                    content=Text(estado, size=12, color=colors.WHITE),
+                    content=Icon(icons.CONFIRMATION_NUMBER, size=24, color=colors.WHITE),
+                    bgcolor=COLOR_PRIMARIO,
+                    padding=8,
+                    border_radius=8
+                ),
+                Text(f"Ticket #{ticket.get('ID_TICKET', '')}", weight=FontWeight.BOLD, size=18, color=COLOR_TEXTO),
+                Container(
+                    content=Row([
+                        Icon(icono_estado, size=14, color=colors.WHITE),
+                        Text(estado, size=12, color=colors.WHITE)
+                    ], spacing=5),
                     bgcolor=color_estado,
                     padding=ft.Padding.symmetric(horizontal=10, vertical=4),
                     border_radius=ft.BorderRadius.all(10)
                 )
-            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+            ], spacing=10, alignment=MainAxisAlignment.START),
             content=Container(
                 content=Column([
+                    # Info del usuario
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.PERSON, size=16, color=COLOR_ACENTO),
+                                Text("Información del Usuario", weight=FontWeight.BOLD, color=COLOR_ACENTO)
+                            ], spacing=8),
+                            Container(height=5),
+                            Row([
+                                Text("Usuario:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=100),
+                                Text(str(ticket.get("USUARIO_AD", "")), color=COLOR_TEXTO)
+                            ]),
+                            Row([
+                                Text("Equipo:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=100),
+                                Text(str(ticket.get("HOSTNAME", "")), color=COLOR_TEXTO)
+                            ]),
+                            Row([
+                                Text("MAC:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=100),
+                                Text(str(ticket.get("MAC_ADDRESS", "")), color=COLOR_TEXTO, size=12)
+                            ]),
+                            Row([
+                                Text("Categoría:", weight=FontWeight.W_500, color=COLOR_TEXTO_SEC, width=100),
+                                Container(
+                                    content=Text(str(ticket.get("CATEGORIA", "")), size=11, color=colors.WHITE),
+                                    bgcolor=COLOR_INFO,
+                                    padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+                                    border_radius=5
+                                )
+                            ])
+                        ]),
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        padding=12,
+                        border_radius=10
+                    ),
+                    
+                    # Descripción
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.DESCRIPTION, size=16, color=COLOR_ACENTO),
+                                Text("Descripción", weight=FontWeight.BOLD, color=COLOR_ACENTO)
+                            ], spacing=8),
+                            Container(height=5),
+                            Text(str(ticket.get("DESCRIPCION", ""))[:250], color=COLOR_TEXTO, size=13)
+                        ]),
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        padding=12,
+                        border_radius=10
+                    ),
+                    
+                    Divider(color=COLOR_BORDE),
+                    
+                    # Acciones
                     Row([
-                        Text("Usuario:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
-                        Text(str(ticket.get("USUARIO_AD", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("Equipo:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
-                        Text(str(ticket.get("HOSTNAME", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("MAC:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
-                        Text(str(ticket.get("MAC_ADDRESS", "")), color=COLOR_TEXTO)
-                    ]),
-                    Row([
-                        Text("Categoría:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
-                        Text(str(ticket.get("CATEGORIA", "")), color=COLOR_TEXTO)
-                    ]),
-                    Divider(),
-                    Text("Descripción:", weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
-                    Text(str(ticket.get("DESCRIPCION", ""))[:200], color=COLOR_TEXTO),
-                    Divider(),
+                        Icon(icons.EDIT, size=16, color=COLOR_ACENTO),
+                        Text("Actualizar Ticket", weight=FontWeight.BOLD, color=COLOR_ACENTO)
+                    ], spacing=8),
                     dd_estado,
                     txt_notas
-                ], spacing=10),
-                width=400,
-                height=400
+                ], spacing=12, scroll=ScrollMode.AUTO),
+                width=420,
+                height=480,
+                padding=5
             ),
             actions=[
-                ft.TextButton("Cerrar", on_click=lambda e: cerrar_dialogo(e)),
-                ft.Button("Guardar", bgcolor=COLOR_PRIMARIO, color=colors.WHITE, on_click=lambda e: guardar_cambios(e))
-            ]
+                ft.TextButton(
+                    content=Row([
+                        Icon(icons.CLOSE, size=18),
+                        Text("Cerrar")
+                    ], spacing=5),
+                    on_click=self._cerrar_dialogo
+                ),
+                ft.ElevatedButton(
+                    content=Row([
+                        Icon(icons.SAVE, size=18, color=colors.WHITE),
+                        Text("Guardar", color=colors.WHITE)
+                    ], spacing=5),
+                    bgcolor=COLOR_PRIMARIO,
+                    on_click=lambda e: guardar_cambios(e)
+                )
+            ],
+            actions_alignment=MainAxisAlignment.END
         )
         
         self.page.show_dialog(dialogo)
@@ -2423,14 +2770,268 @@ class PanelAdminIT:
             self.page.update()
     
     def _mostrar_snackbar(self, mensaje: str, color: str):
-        """Muestra un snackbar con un mensaje."""
+        """Muestra un snackbar mejorado con icono."""
+        # Determinar icono según el color
+        if color == COLOR_EXITO:
+            icono = icons.CHECK_CIRCLE_ROUNDED
+        elif color == COLOR_ERROR:
+            icono = icons.ERROR_ROUNDED
+        elif color == COLOR_ADVERTENCIA:
+            icono = icons.WARNING_ROUNDED
+        else:
+            icono = icons.INFO_ROUNDED
+        
         self.page.snack_bar = SnackBar(
-            content=Text(mensaje, color=colors.WHITE),
+            content=Row([
+                Icon(icono, size=20, color=colors.WHITE),
+                Text(mensaje, color=colors.WHITE, weight=FontWeight.W_500),
+            ], spacing=10),
             bgcolor=color,
-            duration=3000
+            duration=3000,
         )
         self.page.snack_bar.open = True
         self.page.update()
+    
+    # =========================================================================
+    # SISTEMA DE DIÁLOGOS PROFESIONALES
+    # =========================================================================
+    
+    def _crear_dialogo_profesional(self, tipo: str, titulo: str, mensaje: str,
+                                    boton_texto: str = "Aceptar",
+                                    boton_accion=None,
+                                    mostrar_boton_cancelar: bool = False,
+                                    boton_cancelar_texto: str = "Cancelar",
+                                    boton_cancelar_accion=None) -> AlertDialog:
+        """Crea un diálogo profesional con estilo oscuro."""
+        config = DIALOGO_TIPOS.get(tipo, DIALOGO_TIPOS["info"])
+        
+        # Icono animado
+        icono_container = Container(
+            content=Container(
+                content=Icon(config["icono"], size=45, color=config["color"]),
+                bgcolor=config["color_fondo"],
+                border_radius=ft.BorderRadius.all(40),
+                width=80,
+                height=80,
+                alignment=ft.Alignment(0, 0),
+                border=ft.Border.all(2, config["color"]),
+            ),
+            alignment=ft.Alignment(0, 0),
+        )
+        
+        # Contenido
+        contenido = Container(
+            content=Column([
+                icono_container,
+                Container(height=15),
+                Text(
+                    titulo,
+                    size=18,
+                    weight=FontWeight.BOLD,
+                    color=COLOR_TEXTO,
+                    text_align=TextAlign.CENTER,
+                ),
+                Container(height=8),
+                Container(
+                    content=Text(
+                        mensaje,
+                        size=13,
+                        color=COLOR_TEXTO_SEC,
+                        text_align=TextAlign.CENTER,
+                    ),
+                    padding=ft.Padding.symmetric(horizontal=10),
+                ),
+            ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=0),
+            width=320,
+            padding=ft.Padding.only(top=25, bottom=10, left=15, right=15),
+        )
+        
+        # Botones
+        acciones = []
+        
+        if mostrar_boton_cancelar:
+            acciones.append(
+                ft.TextButton(
+                    boton_cancelar_texto,
+                    on_click=boton_cancelar_accion or (lambda e: self._cerrar_dialogo()),
+                    style=ft.ButtonStyle(color=COLOR_TEXTO_SEC),
+                )
+            )
+        
+        acciones.append(
+            ft.ElevatedButton(
+                content=Row([
+                    Icon(icons.CHECK_ROUNDED if tipo == "exito" else icons.ARROW_FORWARD_ROUNDED,
+                         color=colors.WHITE, size=16),
+                    Text(boton_texto, color=colors.WHITE, weight=FontWeight.W_600),
+                ], spacing=6, alignment=MainAxisAlignment.CENTER),
+                bgcolor=config["color"],
+                style=ft.ButtonStyle(
+                    shape=ft.RoundedRectangleBorder(radius=10),
+                ),
+                height=42,
+                on_click=boton_accion or (lambda e: self._cerrar_dialogo()),
+            )
+        )
+        
+        return AlertDialog(
+            modal=True,
+            bgcolor=COLOR_SUPERFICIE,
+            content=contenido,
+            actions=acciones,
+            actions_alignment=MainAxisAlignment.CENTER,
+            shape=ft.RoundedRectangleBorder(radius=20),
+        )
+    
+    def _mostrar_exito(self, mensaje: str, titulo: str = "¡Completado!"):
+        """Muestra un diálogo de éxito."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="exito",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="Aceptar"
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    def _mostrar_error(self, mensaje: str, titulo: str = "¡Error!"):
+        """Muestra un diálogo de error."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="error",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="Entendido"
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    def _mostrar_advertencia(self, mensaje: str, titulo: str = "Atención"):
+        """Muestra un diálogo de advertencia."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="advertencia",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="Entendido"
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    def _mostrar_info(self, mensaje: str, titulo: str = "Información"):
+        """Muestra un diálogo informativo."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="info",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="OK"
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    def _mostrar_confirmacion(self, mensaje: str, titulo: str = "Confirmar",
+                               on_confirmar=None, on_cancelar=None):
+        """Muestra un diálogo de confirmación."""
+        dialogo = self._crear_dialogo_profesional(
+            tipo="confirmar",
+            titulo=titulo,
+            mensaje=mensaje,
+            boton_texto="Confirmar",
+            boton_accion=on_confirmar,
+            mostrar_boton_cancelar=True,
+            boton_cancelar_texto="Cancelar",
+            boton_cancelar_accion=on_cancelar
+        )
+        self.page.overlay.append(dialogo)
+        dialogo.open = True
+        self.page.update()
+    
+    def _cerrar_dialogo(self) -> None:
+        """Cierra el diálogo activo."""
+        if self.page.overlay:
+            self.page.overlay[-1].open = False
+            self.page.update()
+    
+    # =========================================================================
+    # SISTEMA DE OVERLAY DE CARGA
+    # =========================================================================
+    
+    def _mostrar_carga(self, mensaje: str = "Procesando..."):
+        """Muestra un overlay de carga con animación."""
+        if self._carga_activa:
+            if self.texto_carga:
+                self.texto_carga.value = mensaje
+                self.page.update()
+            return
+        
+        self._carga_activa = True
+        
+        self.texto_carga = Text(mensaje, size=14, color=COLOR_TEXTO, weight=FontWeight.W_500)
+        
+        self.overlay_carga = Container(
+            content=Container(
+                content=Column([
+                    # Animación de loading
+                    Container(
+                        content=Stack([
+                            Container(
+                                width=70,
+                                height=70,
+                                border_radius=ft.BorderRadius.all(35),
+                                bgcolor=COLOR_PRIMARIO + "30",
+                            ),
+                            ProgressRing(
+                                width=70,
+                                height=70,
+                                stroke_width=4,
+                                color=COLOR_PRIMARIO,
+                            ),
+                            Container(
+                                content=Icon(icons.SUPPORT_AGENT, size=28, color=COLOR_PRIMARIO),
+                                width=70,
+                                height=70,
+                                alignment=ft.Alignment(0, 0),
+                            ),
+                        ]),
+                    ),
+                    Container(height=20),
+                    self.texto_carga,
+                    Container(height=5),
+                    Text("Por favor espera...", size=11, color=COLOR_TEXTO_SEC),
+                ], horizontal_alignment=CrossAxisAlignment.CENTER),
+                bgcolor=COLOR_SUPERFICIE,
+                border_radius=ft.BorderRadius.all(20),
+                padding=ft.Padding.symmetric(horizontal=40, vertical=30),
+                border=ft.Border.all(1, COLOR_BORDE),
+                shadow=ft.BoxShadow(
+                    spread_radius=0,
+                    blur_radius=30,
+                    color=colors.BLACK54,
+                    offset=ft.Offset(0, 10),
+                ),
+            ),
+            bgcolor=colors.BLACK87,
+            expand=True,
+            alignment=ft.Alignment(0, 0),
+        )
+        
+        self.page.overlay.append(self.overlay_carga)
+        self.page.update()
+    
+    def _ocultar_carga(self):
+        """Oculta el overlay de carga."""
+        if not self._carga_activa:
+            return
+        
+        self._carga_activa = False
+        
+        if self.overlay_carga and self.overlay_carga in self.page.overlay:
+            self.page.overlay.remove(self.overlay_carga)
+            self.overlay_carga = None
+            self.texto_carga = None
+            self.page.update()
     
     def _iniciar_auto_refresh(self):
         """Inicia el auto-refresh en segundo plano."""
@@ -3055,29 +3656,70 @@ class PanelAdminIT:
     def _confirmar_eliminar_equipo(self, mac_address: str):
         """Muestra confirmación para eliminar un equipo."""
         
-        def cerrar_dialogo(e=None):
-            self.page.pop_dialog()
-        
         def eliminar(e):
+            self._cerrar_dialogo(None)
+            self._mostrar_carga("Eliminando equipo...")
+            
             if self.gestor.eliminar_equipo(mac_address):
-                self._mostrar_snackbar("✅ Equipo eliminado", COLOR_EXITO)
-                self.page.pop_dialog()
+                self._ocultar_carga()
+                self._mostrar_exito("Equipo Eliminado", f"El equipo {mac_address} ha sido eliminado del inventario.")
                 self._refrescar_inventario()
             else:
-                self._mostrar_snackbar("❌ No se pudo eliminar", COLOR_ERROR)
+                self._ocultar_carga()
+                self._mostrar_error("Error al eliminar", "No se pudo eliminar el equipo del inventario.")
         
         dlg = AlertDialog(
             modal=True,
-            title=Text("⚠️ Confirmar Eliminación", weight=FontWeight.BOLD),
-            content=Text(f"¿Está seguro de eliminar el equipo {mac_address}?\n\nEsta acción no se puede deshacer."),
+            shape=RoundedRectangleBorder(radius=16),
+            bgcolor=COLOR_SUPERFICIE,
+            title=Row([
+                Container(
+                    content=Icon(icons.DELETE_FOREVER, size=24, color=colors.WHITE),
+                    bgcolor=COLOR_ERROR,
+                    padding=8,
+                    border_radius=8
+                ),
+                Text("Confirmar Eliminación", weight=FontWeight.BOLD, color=COLOR_ERROR, size=18)
+            ], spacing=12),
+            content=Container(
+                content=Column([
+                    Container(
+                        content=Icon(icons.WARNING_AMBER_ROUNDED, size=50, color=COLOR_ADVERTENCIA),
+                        alignment=alignment.center
+                    ),
+                    Container(height=10),
+                    Text("¿Eliminar este equipo del inventario?", color=COLOR_TEXTO, text_align=TextAlign.CENTER),
+                    Container(
+                        content=Text(mac_address, weight=FontWeight.BOLD, color=COLOR_ACENTO, size=16),
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        padding=10,
+                        border_radius=8,
+                        alignment=alignment.center
+                    ),
+                    Row([
+                        Icon(icons.INFO_OUTLINE, size=14, color=COLOR_ERROR_CLARO),
+                        Text("Esta acción no se puede deshacer", size=12, color=COLOR_ERROR_CLARO)
+                    ], alignment=MainAxisAlignment.CENTER, spacing=5)
+                ], spacing=10, horizontal_alignment=CrossAxisAlignment.CENTER),
+                width=320,
+                padding=10
+            ),
             actions_alignment=MainAxisAlignment.END,
             actions=[
-                ft.TextButton("Cancelar", on_click=cerrar_dialogo),
-                ft.Button(
-                    "🗑️ Eliminar",
-                    on_click=eliminar,
+                ft.TextButton(
+                    content=Row([
+                        Icon(icons.CLOSE, size=18),
+                        Text("Cancelar")
+                    ], spacing=5),
+                    on_click=self._cerrar_dialogo
+                ),
+                ft.ElevatedButton(
+                    content=Row([
+                        Icon(icons.DELETE, size=18, color=colors.WHITE),
+                        Text("Eliminar", color=colors.WHITE)
+                    ], spacing=5),
                     bgcolor=COLOR_ERROR,
-                    color=colors.WHITE
+                    on_click=eliminar
                 )
             ]
         )
