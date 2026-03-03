@@ -1,0 +1,35 @@
+# Archivos de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos de datos locales (no subir bases de datos)
+tickets_db.xlsx
+tecnicos_db.xlsx
+equipos_db.xlsx
+red_db.xlsx
+equipos_aprobados.json
+solicitudes_enlace.json
+notificaciones_estado.json
+servidor_config.txt
+ruta_actualizaciones.txt
+actualizacion_config.txt
+
+# Reportes generados
+reporte_*.xlsx
+
+# Python embebido (muy grande para GitHub)
+python_embed/
+
+# Build y distribución
+build/
+dist/
+*.spec
+
+# Archivos temporales
+*.log
+*.tmp
+
+# IDE
+.vscode/
+.idea/

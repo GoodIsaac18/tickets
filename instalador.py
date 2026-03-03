@@ -14,7 +14,9 @@ import winreg
 import urllib.request
 import zipfile
 import threading
+import json
 from pathlib import Path
+from datetime import datetime
 
 # =============================================================================
 # CONFIGURACIÓN
@@ -27,6 +29,30 @@ PYTHON_VERSION = "3.11.9"
 PYTHON_ZIP_NAME = f"python-{PYTHON_VERSION}-embed-amd64.zip"
 PYTHON_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/{PYTHON_ZIP_NAME}"
 GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+
+# Estructura de las bases de datos (para formateo)
+COLUMNAS_DB = [
+    "ID_TICKET", "TURNO", "FECHA_APERTURA", "USUARIO_AD", "HOSTNAME",
+    "MAC_ADDRESS", "CATEGORIA", "PRIORIDAD", "DESCRIPCION", "ESTADO",
+    "TECNICO_ASIGNADO", "NOTAS_RESOLUCION", "FECHA_CIERRE", "TIEMPO_ESTIMADO", "SATISFACCION"
+]
+
+COLUMNAS_TECNICOS = [
+    "ID_TECNICO", "NOMBRE", "ESTADO", "ESPECIALIDAD", "TICKETS_ATENDIDOS",
+    "TICKET_ACTUAL", "ULTIMA_ACTIVIDAD", "TELEFONO", "EMAIL"
+]
+
+COLUMNAS_EQUIPOS = [
+    "MAC_ADDRESS", "NOMBRE_EQUIPO", "HOSTNAME", "USUARIO_ASIGNADO", "GRUPO",
+    "UBICACION", "MARCA", "MODELO", "NUMERO_SERIE", "TIPO_EQUIPO",
+    "SISTEMA_OPERATIVO", "PROCESADOR", "RAM_GB", "DISCO_GB", "FECHA_COMPRA",
+    "GARANTIA_HASTA", "ESTADO_EQUIPO", "NOTAS", "FECHA_REGISTRO", "ULTIMA_CONEXION", "TOTAL_TICKETS"
+]
+
+TECNICOS_INICIALES = [
+    {"id": "TEC001", "nombre": "Carlos Rodríguez", "especialidad": "Hardware/Red", "telefono": "ext. 101", "email": "carlos.rodriguez@empresa.com"},
+    {"id": "TEC002", "nombre": "María García", "especialidad": "Software/Accesos", "telefono": "ext. 102", "email": "maria.garcia@empresa.com"}
+]
 
 DEPENDENCIAS = ["flet", "pandas", "openpyxl", "getmac", "winotify"]
 
@@ -131,6 +157,7 @@ class InstaladorConsola:
         self.crear_acceso_menu = True
         self.iniciar_con_windows = False
         self.abrir_firewall = True
+        self.instalacion_existente = {"emisora": False, "receptora": False}
         
     def limpiar_pantalla(self):
         os.system('cls')
@@ -171,12 +198,457 @@ class InstaladorConsola:
 {self.cyan('║')}     {self.azul('   ╚═╝   ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝')}     {self.cyan('║')}
 {self.cyan('║')}                                                                  {self.cyan('║')}
 {self.cyan('║')}           {self.verde('SISTEMA DE TICKETS PARA SOPORTE TÉCNICO')}              {self.cyan('║')}
-{self.cyan('║')}                      {self.amarillo('INSTALADOR v2.0')}                           {self.cyan('║')}
+{self.cyan('║')}                      {self.amarillo('INSTALADOR v3.0')}                           {self.cyan('║')}
 {self.cyan('║')}                                                                  {self.cyan('║')}
 {self.cyan('╚══════════════════════════════════════════════════════════════════╝')}
 """
         print(banner)
     
+    def detectar_instalaciones(self):
+        """Detecta si hay instalaciones existentes de Emisora y/o Receptora."""
+        escritorio = obtener_escritorio()
+        menu = obtener_menu_inicio() / "Sistema Tickets IT"
+        startup = obtener_carpeta_startup()
+        
+        # Detectar Emisora
+        emisora_vbs = INSTALL_DIR / "launcher_emisora.vbs"
+        emisora_escritorio = escritorio / f"{APP_NAME_EMISORA}.lnk"
+        emisora_menu = menu / f"{APP_NAME_EMISORA}.lnk"
+        emisora_startup = startup / f"{APP_NAME_EMISORA}.lnk"
+        
+        self.instalacion_existente["emisora"] = (
+            emisora_vbs.exists() or 
+            emisora_escritorio.exists() or 
+            emisora_menu.exists() or
+            emisora_startup.exists()
+        )
+        
+        # Detectar Receptora
+        receptora_vbs = INSTALL_DIR / "launcher_receptora.vbs"
+        receptora_escritorio = escritorio / f"{APP_NAME_RECEPTORA}.lnk"
+        receptora_menu = menu / f"{APP_NAME_RECEPTORA}.lnk"
+        receptora_startup = startup / f"{APP_NAME_RECEPTORA}.lnk"
+        
+        self.instalacion_existente["receptora"] = (
+            receptora_vbs.exists() or 
+            receptora_escritorio.exists() or 
+            receptora_menu.exists() or
+            receptora_startup.exists()
+        )
+        
+        return self.instalacion_existente["emisora"] or self.instalacion_existente["receptora"]
+    
+    def mostrar_menu_principal(self):
+        """Muestra el menú principal con opción de desinstalar."""
+        hay_instalacion = self.detectar_instalaciones()
+        
+        print(f"""
+{self.amarillo('¿Qué desea hacer?')}
+""")
+        
+        if hay_instalacion:
+            estado_emisora = self.verde("✓ Instalada") if self.instalacion_existente["emisora"] else self.rojo("✗ No instalada")
+            estado_receptora = self.verde("✓ Instalada") if self.instalacion_existente["receptora"] else self.rojo("✗ No instalada")
+            
+            print(f"""  {self.cyan('Estado actual:')}
+      • Emisora:   {estado_emisora}
+      • Receptora: {estado_receptora}
+""")
+        
+        print(f"""  {self.verde('[1]')} {self.cyan('INSTALAR')} - Instalar Emisora o Receptora
+  {self.verde('[2]')} {self.cyan('DESINSTALAR')} - Eliminar aplicaciones instaladas
+  {self.verde('[3]')} {self.cyan('REINSTALAR')} - Reinstalar conservando datos
+  {self.verde('[4]')} {self.cyan('FORMATEAR')} - Eliminar todo e instalar limpio
+  
+  {self.rojo('[0]')} Salir
+""")
+    
+    def desinstalar_aplicacion(self, tipo):
+        """Desinstala una aplicación específica (emisora o receptora)."""
+        if tipo == "emisora":
+            nombre_app = APP_NAME_EMISORA
+            vbs_path = INSTALL_DIR / "launcher_emisora.vbs"
+        else:
+            nombre_app = APP_NAME_RECEPTORA
+            vbs_path = INSTALL_DIR / "launcher_receptora.vbs"
+        
+        escritorio = obtener_escritorio()
+        menu = obtener_menu_inicio() / "Sistema Tickets IT"
+        startup = obtener_carpeta_startup()
+        
+        acciones = []
+        
+        # Eliminar launcher VBS
+        if vbs_path.exists():
+            try:
+                vbs_path.unlink()
+                acciones.append(f"Launcher {tipo}")
+            except:
+                pass
+        
+        # Eliminar acceso del escritorio
+        acceso_escritorio = escritorio / f"{nombre_app}.lnk"
+        if acceso_escritorio.exists():
+            try:
+                acceso_escritorio.unlink()
+                acciones.append("Acceso escritorio")
+            except:
+                pass
+        
+        # Eliminar acceso del menú inicio
+        acceso_menu = menu / f"{nombre_app}.lnk"
+        if acceso_menu.exists():
+            try:
+                acceso_menu.unlink()
+                acciones.append("Acceso menú inicio")
+            except:
+                pass
+        
+        # Eliminar entrada de startup
+        acceso_startup = startup / f"{nombre_app}.lnk"
+        if acceso_startup.exists():
+            try:
+                acceso_startup.unlink()
+                acciones.append("Inicio automático")
+            except:
+                pass
+        
+        return acciones
+    
+    def ejecutar_desinstalacion(self):
+        """Muestra menú de desinstalación y ejecuta la acción."""
+        self.mostrar_banner()
+        
+        if not self.instalacion_existente["emisora"] and not self.instalacion_existente["receptora"]:
+            print(f"""
+{self.amarillo('No hay aplicaciones instaladas para desinstalar.')}
+
+  El sistema no detectó ninguna instalación previa de:
+  • Soporte Técnico - Emisora
+  • Soporte Técnico - Receptora
+""")
+            input(f"\n  {self.verde('Presione Enter para volver...')}")
+            return
+        
+        estado_emisora = self.verde("✓ Instalada") if self.instalacion_existente["emisora"] else self.rojo("✗ No instalada")
+        estado_receptora = self.verde("✓ Instalada") if self.instalacion_existente["receptora"] else self.rojo("✗ No instalada")
+        
+        print(f"""
+{self.cyan('═' * 60)}
+{self.rojo('  DESINSTALADOR - SISTEMA DE TICKETS')}
+{self.cyan('═' * 60)}
+
+{self.amarillo('Estado de instalaciones:')}
+  • Emisora:   {estado_emisora}
+  • Receptora: {estado_receptora}
+
+{self.amarillo('¿Qué desea desinstalar?')}
+
+  {self.verde('[1]')} Desinstalar {self.cyan('EMISORA')} únicamente
+  {self.verde('[2]')} Desinstalar {self.cyan('RECEPTORA')} únicamente
+  {self.verde('[3]')} Desinstalar {self.cyan('AMBAS')} aplicaciones
+  
+  {self.rojo('[0]')} Cancelar
+
+{self.amarillo('NOTA:')} Los datos (tickets, equipos aprobados, etc.) NO se eliminarán.
+""")
+        
+        opcion = input("  Seleccione una opción: ").strip()
+        
+        if opcion == "0":
+            return
+        
+        apps_a_desinstalar = []
+        if opcion == "1" and self.instalacion_existente["emisora"]:
+            apps_a_desinstalar.append("emisora")
+        elif opcion == "2" and self.instalacion_existente["receptora"]:
+            apps_a_desinstalar.append("receptora")
+        elif opcion == "3":
+            if self.instalacion_existente["emisora"]:
+                apps_a_desinstalar.append("emisora")
+            if self.instalacion_existente["receptora"]:
+                apps_a_desinstalar.append("receptora")
+        
+        if not apps_a_desinstalar:
+            print(f"\n  {self.amarillo('La aplicación seleccionada no está instalada.')}")
+            input(f"\n  {self.verde('Presione Enter para volver...')}")
+            return
+        
+        # Confirmar
+        print(f"\n{self.rojo('¡ATENCIÓN!')} Se desinstalarán: {', '.join(apps_a_desinstalar).upper()}")
+        confirmar = input(f"\n  Escriba {self.verde('SI')} para confirmar: ").strip().upper()
+        
+        if confirmar != "SI":
+            print(f"\n  {self.amarillo('Desinstalación cancelada.')}")
+            input(f"\n  {self.verde('Presione Enter para volver...')}")
+            return
+        
+        # Ejecutar desinstalación
+        print(f"\n{self.cyan('═' * 60)}")
+        print(f"{self.verde('  DESINSTALANDO...')}")
+        print(f"{self.cyan('═' * 60)}\n")
+        
+        for app in apps_a_desinstalar:
+            acciones = self.desinstalar_aplicacion(app)
+            nombre = APP_NAME_EMISORA if app == "emisora" else APP_NAME_RECEPTORA
+            if acciones:
+                print(f"  {self.verde('✓')} {nombre} desinstalada")
+                for accion in acciones:
+                    print(f"      - {accion} eliminado")
+            else:
+                print(f"  {self.amarillo('!')} {nombre} - no había componentes que eliminar")
+        
+        # Eliminar regla de firewall
+        print(f"\n  {self.verde('→')} Eliminando regla de firewall...")
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=TicketsIT_Servidor"],
+            capture_output=True
+        )
+        
+        # Eliminar carpeta del menú inicio si está vacía
+        menu = obtener_menu_inicio() / "Sistema Tickets IT"
+        try:
+            if menu.exists() and not any(menu.iterdir()):
+                menu.rmdir()
+                print(f"  {self.verde('✓')} Carpeta del menú inicio eliminada")
+        except:
+            pass
+        
+        print(f"""
+{self.cyan('═' * 60)}
+{self.verde('  DESINSTALACIÓN COMPLETADA')}
+{self.cyan('═' * 60)}
+
+  Los archivos del programa permanecen en:
+  {self.cyan(str(INSTALL_DIR))}
+  
+  Puede eliminarlos manualmente si lo desea.
+""")
+        input(f"\n  {self.verde('Presione Enter para finalizar...')}")
+    
+    def ejecutar_formateo(self):
+        """Elimina todo (datos incluidos) y crea bases de datos nuevas."""
+        self.mostrar_banner()
+        
+        print(f"""
+{self.cyan('═' * 60)}
+{self.rojo('  FORMATEO COMPLETO - ¡PRECAUCIÓN!')}
+{self.cyan('═' * 60)}
+
+{self.amarillo('Esta acción eliminará TODOS los datos:')}
+
+  • Accesos directos y configuraciones
+  • Archivo de tickets (historial completo)
+  • Base de datos de técnicos
+  • Base de datos de equipos/inventario
+  • Equipos aprobados/rechazados
+  • Solicitudes de enlace pendientes
+  • Configuración del servidor
+  
+{self.rojo('¡ESTA ACCIÓN NO SE PUEDE DESHACER!')}
+
+Después del formateo, se crearán bases de datos NUEVAS y vacías.
+""")
+        
+        confirmar1 = input(f"  Escriba {self.verde('FORMATEAR')} para continuar: ").strip().upper()
+        
+        if confirmar1 != "FORMATEAR":
+            print(f"\n  {self.amarillo('Operación cancelada.')}")
+            input(f"\n  {self.verde('Presione Enter para volver...')}")
+            return
+        
+        print(f"\n{self.rojo('¿Está COMPLETAMENTE SEGURO?')}")
+        confirmar2 = input(f"  Escriba {self.verde('SI')} para confirmar el formateo: ").strip().upper()
+        
+        if confirmar2 != "SI":
+            print(f"\n  {self.amarillo('Operación cancelada.')}")
+            input(f"\n  {self.verde('Presione Enter para volver...')}")
+            return
+        
+        print(f"\n{self.cyan('═' * 60)}")
+        print(f"{self.rojo('  FORMATEANDO...')}")
+        print(f"{self.cyan('═' * 60)}\n")
+        
+        # Desinstalar ambas apps
+        if self.instalacion_existente["emisora"]:
+            self.desinstalar_aplicacion("emisora")
+            print(f"  {self.verde('✓')} Emisora desinstalada")
+        
+        if self.instalacion_existente["receptora"]:
+            self.desinstalar_aplicacion("receptora")
+            print(f"  {self.verde('✓')} Receptora desinstalada")
+        
+        # Eliminar todos los archivos de datos
+        archivos_datos = [
+            "tickets_db.xlsx",      # Base de datos de tickets
+            "tecnicos_db.xlsx",     # Base de datos de técnicos
+            "equipos_db.xlsx",      # Base de datos de equipos/inventario
+            "equipos_aprobados.json",
+            "solicitudes_enlace.json",
+            "notificaciones_estado.json",
+            "servidor_config.txt",
+            "desinstalar.bat"
+        ]
+        
+        print(f"\n  {self.amarillo('Eliminando archivos de datos...')}")
+        for archivo in archivos_datos:
+            ruta = INSTALL_DIR / archivo
+            if ruta.exists():
+                try:
+                    ruta.unlink()
+                    print(f"  {self.verde('✓')} {archivo} eliminado")
+                except:
+                    print(f"  {self.amarillo('!')} No se pudo eliminar {archivo}")
+        
+        # Eliminar regla de firewall
+        subprocess.run(
+            ["netsh", "advfirewall", "firewall", "delete", "rule", "name=TicketsIT_Servidor"],
+            capture_output=True
+        )
+        print(f"  {self.verde('✓')} Regla de firewall eliminada")
+        
+        # Recrear bases de datos nuevas
+        print(f"\n  {self.amarillo('Creando bases de datos nuevas...')}")
+        self._crear_bases_datos_nuevas()
+        
+        print(f"""
+{self.cyan('═' * 60)}
+{self.verde('  FORMATEO COMPLETADO')}
+{self.cyan('═' * 60)}
+
+  El sistema ha sido formateado completamente.
+  Se han creado bases de datos nuevas y vacías.
+  
+  Está listo para una instalación limpia.
+""")
+        
+        continuar = input(f"  ¿Desea instalar ahora? ({self.verde('S')}/{self.rojo('N')}): ").strip().upper()
+        
+        if continuar == "S":
+            self.ejecutar()
+        else:
+            input(f"\n  {self.verde('Presione Enter para finalizar...')}")
+    
+    def _crear_bases_datos_nuevas(self):
+        """Crea las bases de datos Excel y JSON nuevas y vacías."""
+        try:
+            import pandas as pd
+            
+            # 1. Crear tickets_db.xlsx vacío con encabezados
+            ruta_tickets = INSTALL_DIR / "tickets_db.xlsx"
+            df_tickets = pd.DataFrame(columns=COLUMNAS_DB)
+            df_tickets.to_excel(ruta_tickets, index=False, engine='openpyxl')
+            print(f"  {self.verde('✓')} tickets_db.xlsx creado (vacío)")
+            
+            # 2. Crear tecnicos_db.xlsx con técnicos iniciales
+            ruta_tecnicos = INSTALL_DIR / "tecnicos_db.xlsx"
+            tecnicos_iniciales = []
+            for tec in TECNICOS_INICIALES:
+                tecnicos_iniciales.append({
+                    "ID_TECNICO": tec["id"],
+                    "NOMBRE": tec["nombre"],
+                    "ESTADO": "Disponible",
+                    "ESPECIALIDAD": tec["especialidad"],
+                    "TICKETS_ATENDIDOS": 0,
+                    "TICKET_ACTUAL": "",
+                    "ULTIMA_ACTIVIDAD": datetime.now(),
+                    "TELEFONO": tec["telefono"],
+                    "EMAIL": tec["email"]
+                })
+            df_tecnicos = pd.DataFrame(tecnicos_iniciales)
+            df_tecnicos.to_excel(ruta_tecnicos, index=False, engine='openpyxl')
+            print(f"  {self.verde('✓')} tecnicos_db.xlsx creado (con técnicos iniciales)")
+            
+            # 3. Crear equipos_db.xlsx vacío con encabezados
+            ruta_equipos = INSTALL_DIR / "equipos_db.xlsx"
+            df_equipos = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+            df_equipos.to_excel(ruta_equipos, index=False, engine='openpyxl')
+            print(f"  {self.verde('✓')} equipos_db.xlsx creado (vacío)")
+            
+            # 4. Crear equipos_aprobados.json vacío
+            ruta_equipos_json = INSTALL_DIR / "equipos_aprobados.json"
+            with open(ruta_equipos_json, 'w', encoding='utf-8') as f:
+                json.dump({"aprobados": [], "rechazados": []}, f, indent=2, ensure_ascii=False)
+            print(f"  {self.verde('✓')} equipos_aprobados.json creado")
+            
+            # 5. Crear solicitudes_enlace.json vacío
+            ruta_solicitudes = INSTALL_DIR / "solicitudes_enlace.json"
+            with open(ruta_solicitudes, 'w', encoding='utf-8') as f:
+                json.dump([], f, indent=2, ensure_ascii=False)
+            print(f"  {self.verde('✓')} solicitudes_enlace.json creado")
+            
+            # 6. Crear notificaciones_estado.json vacío
+            ruta_notif = INSTALL_DIR / "notificaciones_estado.json"
+            with open(ruta_notif, 'w', encoding='utf-8') as f:
+                json.dump({}, f, indent=2, ensure_ascii=False)
+            print(f"  {self.verde('✓')} notificaciones_estado.json creado")
+            
+        except ImportError:
+            print(f"  {self.amarillo('!')} pandas no instalado - las bases de datos se crearán al iniciar la aplicación")
+        except Exception as e:
+            print(f"  {self.amarillo('!')} Error creando bases de datos: {e}")
+    
+    def ejecutar_reinstalacion(self):
+        """Reinstala conservando los datos."""
+        self.mostrar_banner()
+        
+        print(f"""
+{self.cyan('═' * 60)}
+{self.amarillo('  REINSTALACIÓN - Conservará sus datos')}
+{self.cyan('═' * 60)}
+
+  Esta acción reinstalará las aplicaciones seleccionadas
+  conservando todos los datos existentes:
+  
+  • Tickets existentes
+  • Equipos aprobados
+  • Configuraciones
+""")
+        
+        if not self.instalacion_existente["emisora"] and not self.instalacion_existente["receptora"]:
+            print(f"\n  {self.amarillo('No hay aplicaciones instaladas para reinstalar.')}")
+            print(f"  Use la opción {self.verde('INSTALAR')} para una nueva instalación.")
+            input(f"\n  {self.verde('Presione Enter para volver...')}")
+            return
+        
+        estado_emisora = self.verde("✓") if self.instalacion_existente["emisora"] else self.rojo("✗")
+        estado_receptora = self.verde("✓") if self.instalacion_existente["receptora"] else self.rojo("✗")
+        
+        print(f"""
+{self.amarillo('¿Qué desea reinstalar?')}
+
+  {self.verde('[1]')} Reinstalar {self.cyan('EMISORA')} {estado_emisora}
+  {self.verde('[2]')} Reinstalar {self.cyan('RECEPTORA')} {estado_receptora}
+  {self.verde('[3]')} Reinstalar {self.cyan('AMBAS')}
+  
+  {self.rojo('[0]')} Cancelar
+""")
+        
+        opcion = input("  Seleccione una opción: ").strip()
+        
+        if opcion == "0":
+            return
+        
+        # Determinar qué reinstalar
+        reinstalar_emisora = opcion in ["1", "3"]
+        reinstalar_receptora = opcion in ["2", "3"]
+        
+        if reinstalar_emisora:
+            if self.instalacion_existente["emisora"]:
+                self.desinstalar_aplicacion("emisora")
+            self.tipo_instalacion = "emisora"
+            if not self.configurar_opciones():
+                return
+            self.ejecutar_instalacion()
+        
+        if reinstalar_receptora:
+            if self.instalacion_existente["receptora"]:
+                self.desinstalar_aplicacion("receptora")
+            self.tipo_instalacion = "receptora"
+            if not self.configurar_opciones():
+                return
+            self.ejecutar_instalacion()
+
     def mostrar_menu_tipo(self):
         """Muestra el menú para elegir tipo de instalación."""
         print(f"""
@@ -542,6 +1014,10 @@ pause
             ("Creando desinstalador...", self.crear_desinstalador),
         ]
         
+        # Para RECEPTORA, agregar paso de crear bases de datos
+        if self.tipo_instalacion == "receptora":
+            pasos.append(("Inicializando bases de datos...", self._inicializar_bases_datos))
+        
         for descripcion, funcion in pasos:
             resultado = funcion()
             if resultado is False:
@@ -552,6 +1028,112 @@ pause
         # Mostrar resumen final
         self.mostrar_resumen_final()
         return True
+    
+    def _inicializar_bases_datos(self):
+        """Inicializa las bases de datos Excel y archivos JSON si no existen."""
+        try:
+            import pandas as pd
+            from datetime import datetime
+            
+            print(f"\n  {self.amarillo('→')} Verificando bases de datos...")
+            
+            # 1. Crear tickets_db.xlsx si no existe o está corrupto
+            ruta_tickets = INSTALL_DIR / "tickets_db.xlsx"
+            if not ruta_tickets.exists() or ruta_tickets.stat().st_size < 100:
+                df_tickets = pd.DataFrame(columns=COLUMNAS_DB)
+                df_tickets.to_excel(ruta_tickets, index=False, engine='openpyxl')
+                print(f"  {self.verde('✓')} tickets_db.xlsx inicializado")
+            else:
+                try:
+                    pd.read_excel(ruta_tickets, engine='openpyxl', nrows=0)
+                    print(f"  {self.verde('✓')} tickets_db.xlsx verificado")
+                except:
+                    df_tickets = pd.DataFrame(columns=COLUMNAS_DB)
+                    df_tickets.to_excel(ruta_tickets, index=False, engine='openpyxl')
+                    print(f"  {self.verde('✓')} tickets_db.xlsx reparado")
+            
+            # 2. Crear tecnicos_db.xlsx si no existe o está corrupto
+            ruta_tecnicos = INSTALL_DIR / "tecnicos_db.xlsx"
+            if not ruta_tecnicos.exists() or ruta_tecnicos.stat().st_size < 100:
+                tecnicos_iniciales = []
+                for tec in TECNICOS_INICIALES:
+                    tecnicos_iniciales.append({
+                        "ID_TECNICO": tec["id"],
+                        "NOMBRE": tec["nombre"],
+                        "ESTADO": "Disponible",
+                        "ESPECIALIDAD": tec["especialidad"],
+                        "TICKETS_ATENDIDOS": 0,
+                        "TICKET_ACTUAL": "",
+                        "ULTIMA_ACTIVIDAD": datetime.now(),
+                        "TELEFONO": tec["telefono"],
+                        "EMAIL": tec["email"]
+                    })
+                df_tecnicos = pd.DataFrame(tecnicos_iniciales)
+                df_tecnicos.to_excel(ruta_tecnicos, index=False, engine='openpyxl')
+                print(f"  {self.verde('✓')} tecnicos_db.xlsx inicializado con técnicos")
+            else:
+                try:
+                    pd.read_excel(ruta_tecnicos, engine='openpyxl', nrows=0)
+                    print(f"  {self.verde('✓')} tecnicos_db.xlsx verificado")
+                except:
+                    tecnicos_iniciales = []
+                    for tec in TECNICOS_INICIALES:
+                        tecnicos_iniciales.append({
+                            "ID_TECNICO": tec["id"],
+                            "NOMBRE": tec["nombre"],
+                            "ESTADO": "Disponible",
+                            "ESPECIALIDAD": tec["especialidad"],
+                            "TICKETS_ATENDIDOS": 0,
+                            "TICKET_ACTUAL": "",
+                            "ULTIMA_ACTIVIDAD": datetime.now(),
+                            "TELEFONO": tec["telefono"],
+                            "EMAIL": tec["email"]
+                        })
+                    df_tecnicos = pd.DataFrame(tecnicos_iniciales)
+                    df_tecnicos.to_excel(ruta_tecnicos, index=False, engine='openpyxl')
+                    print(f"  {self.verde('✓')} tecnicos_db.xlsx reparado")
+            
+            # 3. Crear equipos_db.xlsx si no existe o está corrupto
+            ruta_equipos = INSTALL_DIR / "equipos_db.xlsx"
+            if not ruta_equipos.exists() or ruta_equipos.stat().st_size < 100:
+                df_equipos = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+                df_equipos.to_excel(ruta_equipos, index=False, engine='openpyxl')
+                print(f"  {self.verde('✓')} equipos_db.xlsx inicializado")
+            else:
+                try:
+                    pd.read_excel(ruta_equipos, engine='openpyxl', nrows=0)
+                    print(f"  {self.verde('✓')} equipos_db.xlsx verificado")
+                except:
+                    df_equipos = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+                    df_equipos.to_excel(ruta_equipos, index=False, engine='openpyxl')
+                    print(f"  {self.verde('✓')} equipos_db.xlsx reparado")
+            
+            # 4. Crear archivos JSON si no existen
+            archivos_json = {
+                "equipos_aprobados.json": {"aprobados": [], "rechazados": []},
+                "solicitudes_enlace.json": [],
+                "notificaciones_estado.json": {}
+            }
+            
+            for archivo, contenido_default in archivos_json.items():
+                ruta = INSTALL_DIR / archivo
+                if not ruta.exists():
+                    with open(ruta, 'w', encoding='utf-8') as f:
+                        json.dump(contenido_default, f, indent=2, ensure_ascii=False)
+                    print(f"  {self.verde('✓')} {archivo} creado")
+                else:
+                    print(f"  {self.verde('✓')} {archivo} verificado")
+            
+            print(f"\n  {self.verde('✓')} Bases de datos listas")
+            return True
+            
+        except ImportError as e:
+            print(f"  {self.amarillo('!')} pandas no disponible - las bases de datos se crearán al iniciar")
+            return True
+        except Exception as e:
+            print(f"  {self.amarillo('!')} Error inicializando bases de datos: {e}")
+            print(f"  {self.amarillo('!')} Las bases de datos se crearán al iniciar la aplicación")
+            return True  # No fallar la instalación por esto
     
     def mostrar_resumen_final(self):
         """Muestra el resumen de la instalación."""
@@ -612,18 +1194,37 @@ pause
     
     def ejecutar(self):
         """Punto de entrada principal del instalador."""
-        # Seleccionar tipo de instalación
-        if not self.seleccionar_tipo():
-            print(f"\n  {self.amarillo('Instalación cancelada.')}")
-            return
-        
-        # Configurar opciones
-        if not self.configurar_opciones():
-            print(f"\n  {self.amarillo('Instalación cancelada.')}")
-            return
-        
-        # Ejecutar instalación
-        self.ejecutar_instalacion()
+        while True:
+            self.mostrar_banner()
+            self.detectar_instalaciones()
+            self.mostrar_menu_principal()
+            
+            opcion = input("  Seleccione una opción: ").strip()
+            
+            if opcion == "0":
+                print(f"\n  {self.amarillo('¡Hasta luego!')}")
+                break
+            elif opcion == "1":
+                # Instalación nueva
+                if not self.seleccionar_tipo():
+                    continue
+                if not self.configurar_opciones():
+                    continue
+                self.ejecutar_instalacion()
+                break
+            elif opcion == "2":
+                # Desinstalar
+                self.ejecutar_desinstalacion()
+            elif opcion == "3":
+                # Reinstalar
+                self.ejecutar_reinstalacion()
+                break
+            elif opcion == "4":
+                # Formatear
+                self.ejecutar_formateo()
+            else:
+                print(f"\n  {self.rojo('Opción no válida.')}")
+                input(f"  {self.verde('Presione Enter para continuar...')}")
 
 
 # =============================================================================

@@ -2193,25 +2193,38 @@ class AppEmisora:
                 self.texto_carga.value = "Enviando al servidor..."
                 self.page.update()
             
+            # DEBUG: Mostrar estado de conexión
+            print(f"[CLIENTE] === DEBUG ENVÍO TICKET ===")
+            print(f"[CLIENTE] servidor_conectado: {self.servidor_conectado}")
+            print(f"[CLIENTE] servidor_ip: {self.servidor_ip}")
+            print(f"[CLIENTE] enlazado: {self.enlazado}")
+            
             # Intentar enviar por red si está enlazado
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
+                    print(f"[CLIENTE] Enviando ticket a {self.servidor_ip}:{self.servidor_puerto}...")
                     resultado = enviar_ticket_a_servidor(
                         self.servidor_ip,
                         self.servidor_puerto,
                         datos_ticket
                     )
+                    print(f"[CLIENTE] Resultado del servidor: {resultado}")
                     if resultado and resultado.get("success"):
                         ticket = resultado.get("ticket", {})
-                        print(f"[CLIENTE] Ticket enviado por red: {ticket.get('ID_TICKET', 'N/A')}")
+                        print(f"[CLIENTE] ✅ Ticket enviado por red: {ticket.get('ID_TICKET', 'N/A')}")
+                    else:
+                        print(f"[CLIENTE] ❌ Error del servidor: {resultado}")
                 except Exception as e:
-                    print(f"[CLIENTE] Error de red, guardando local: {e}")
+                    print(f"[CLIENTE] ❌ Error de red, guardando local: {e}")
+                    import traceback
+                    traceback.print_exc()
                     if self.texto_carga:
                         self.texto_carga.value = "Guardando localmente..."
                         self.page.update()
                     ticket = self.gestor.crear_ticket(**datos_ticket)
                     print(f"[CLIENTE] Ticket guardado localmente: {ticket.get('ID_TICKET', 'N/A')}")
             else:
+                print(f"[CLIENTE] ⚠️ No conectado/enlazado, guardando local")
                 if self.texto_carga:
                     self.texto_carga.value = "Guardando ticket..."
                     self.page.update()
@@ -2314,8 +2327,36 @@ class AppEmisora:
         self.page.update()
 
 
+def _verificar_configuracion_inicial():
+    """Verifica y crea archivos de configuración si son necesarios."""
+    from pathlib import Path
+    
+    base_path = Path(__file__).parent
+    config_file = base_path / "servidor_config.txt"
+    
+    print("[AUTO-INIT] 🔧 Verificando configuración...")
+    
+    # Crear archivo de configuración vacío si no existe
+    if not config_file.exists():
+        try:
+            config_file.write_text("")
+            print("[AUTO-INIT] ✅ Archivo de configuración creado")
+        except Exception as e:
+            print(f"[AUTO-INIT] ⚠️  No se pudo crear configuración: {e}")
+    else:
+        print("[AUTO-INIT] ✓ Configuración OK")
+    
+    print("[AUTO-INIT] ✅ Verificación completada")
+
+
 def main(page: Page):
     """Punto de entrada de la aplicación."""
+    # Verificar configuración al inicio
+    try:
+        _verificar_configuracion_inicial()
+    except Exception as e:
+        print(f"[ERROR] Error en verificación inicial: {e}")
+    
     AppEmisora(page)
 
 

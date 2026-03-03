@@ -176,83 +176,219 @@ class GestorTickets:
         self.ruta_excel = ruta_excel
         self.ruta_tecnicos = ruta_tecnicos
         self.ruta_equipos = ruta_equipos
-        self._asegurar_existencia_db()
-        self._asegurar_existencia_tecnicos()
-        self._asegurar_existencia_equipos()
+        
+        # Intentar inicializar las bases de datos con manejo robusto de errores
+        try:
+            self._asegurar_existencia_db()
+        except Exception as e:
+            print(f"[WARNING] Error al crear DB de tickets: {e}")
+            print(f"[INFO] Usando base de datos en memoria para tickets")
+        
+        try:
+            self._asegurar_existencia_tecnicos()
+        except Exception as e:
+            print(f"[WARNING] Error al crear DB de técnicos: {e}")
+            print(f"[INFO] Usando base de datos en memoria para técnicos")
+        
+        try:
+            self._asegurar_existencia_equipos()
+        except Exception as e:
+            print(f"[WARNING] Error al crear DB de equipos: {e}")
+            print(f"[INFO] Usando base de datos en memoria para equipos")
     
     def _asegurar_existencia_db(self) -> None:
         """
         Verifica si el archivo Excel de tickets existe. Si no existe, lo crea.
         """
-        if not self.ruta_excel.exists():
-            df_vacio = pd.DataFrame(columns=COLUMNAS_DB)
-            df_vacio.to_excel(self.ruta_excel, index=False, engine='openpyxl')
-            print(f"[INFO] Base de datos de tickets creada en: {self.ruta_excel}")
+        try:
+            if not self.ruta_excel.exists():
+                # Asegurar que el directorio existe
+                self.ruta_excel.parent.mkdir(parents=True, exist_ok=True)
+                
+                df_vacio = pd.DataFrame(columns=COLUMNAS_DB)
+                df_vacio.to_excel(self.ruta_excel, index=False, engine='openpyxl')
+                print(f"[INFO] Base de datos de tickets creada en: {self.ruta_excel}")
+            elif not self._validar_integridad_db(self.ruta_excel, COLUMNAS_DB):
+                # Si existe pero está corrupta, recrearla
+                print(f"[WARNING] Base de datos de tickets corrupta, recreando...")
+                self.ruta_excel.unlink()
+                df_vacio = pd.DataFrame(columns=COLUMNAS_DB)
+                df_vacio.to_excel(self.ruta_excel, index=False, engine='openpyxl')
+                print(f"[INFO] Base de datos de tickets recreada")
+        except PermissionError:
+            print(f"[ERROR] Permiso denegado para crear: {self.ruta_excel}")
+            raise
+        except Exception as e:
+            print(f"[ERROR] Error inesperado al crear DB de tickets: {type(e).__name__}: {e}")
+            raise
     
     def _asegurar_existencia_tecnicos(self) -> None:
         """
         Verifica si el archivo de técnicos existe. Si no, lo crea con los técnicos iniciales.
         """
-        if not self.ruta_tecnicos.exists():
-            tecnicos_iniciales = []
-            for tec in TECNICOS_EQUIPO:
-                tecnicos_iniciales.append({
-                    "ID_TECNICO": tec["id"],
-                    "NOMBRE": tec["nombre"],
-                    "ESTADO": "Disponible",
-                    "ESPECIALIDAD": tec["especialidad"],
-                    "TICKETS_ATENDIDOS": 0,
-                    "TICKET_ACTUAL": "",
-                    "ULTIMA_ACTIVIDAD": datetime.now(),
-                    "TELEFONO": tec["telefono"],
-                    "EMAIL": tec["email"]
-                })
-            df_tecnicos = pd.DataFrame(tecnicos_iniciales)
-            df_tecnicos.to_excel(self.ruta_tecnicos, index=False, engine='openpyxl')
-            print(f"[INFO] Base de datos de técnicos creada en: {self.ruta_tecnicos}")
+        try:
+            if not self.ruta_tecnicos.exists():
+                # Asegurar que el directorio existe
+                self.ruta_tecnicos.parent.mkdir(parents=True, exist_ok=True)
+                
+                tecnicos_iniciales = []
+                for tec in TECNICOS_EQUIPO:
+                    tecnicos_iniciales.append({
+                        "ID_TECNICO": tec["id"],
+                        "NOMBRE": tec["nombre"],
+                        "ESTADO": "Disponible",
+                        "ESPECIALIDAD": tec["especialidad"],
+                        "TICKETS_ATENDIDOS": 0,
+                        "TICKET_ACTUAL": "",
+                        "ULTIMA_ACTIVIDAD": datetime.now(),
+                        "TELEFONO": tec["telefono"],
+                        "EMAIL": tec["email"]
+                    })
+                df_tecnicos = pd.DataFrame(tecnicos_iniciales)
+                df_tecnicos.to_excel(self.ruta_tecnicos, index=False, engine='openpyxl')
+                print(f"[INFO] Base de datos de técnicos creada en: {self.ruta_tecnicos}")
+            elif not self._validar_integridad_db(self.ruta_tecnicos, COLUMNAS_TECNICOS):
+                # Si existe pero está corrupta, recrearla
+                print(f"[WARNING] Base de datos de técnicos corrupta, recreando...")
+                self.ruta_tecnicos.unlink()
+                tecnicos_iniciales = []
+                for tec in TECNICOS_EQUIPO:
+                    tecnicos_iniciales.append({
+                        "ID_TECNICO": tec["id"],
+                        "NOMBRE": tec["nombre"],
+                        "ESTADO": "Disponible",
+                        "ESPECIALIDAD": tec["especialidad"],
+                        "TICKETS_ATENDIDOS": 0,
+                        "TICKET_ACTUAL": "",
+                        "ULTIMA_ACTIVIDAD": datetime.now(),
+                        "TELEFONO": tec["telefono"],
+                        "EMAIL": tec["email"]
+                    })
+                df_tecnicos = pd.DataFrame(tecnicos_iniciales)
+                df_tecnicos.to_excel(self.ruta_tecnicos, index=False, engine='openpyxl')
+                print(f"[INFO] Base de datos de técnicos recreada")
+        except PermissionError:
+            print(f"[ERROR] Permiso denegado para crear: {self.ruta_tecnicos}")
+            raise
+        except Exception as e:
+            print(f"[ERROR] Error inesperado al crear DB de técnicos: {type(e).__name__}: {e}")
+            raise
     
     def _asegurar_existencia_equipos(self) -> None:
         """
         Verifica si el archivo de equipos/inventario existe. Si no, lo crea vacío.
         """
-        if not self.ruta_equipos.exists():
-            df_equipos = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
-            df_equipos.to_excel(self.ruta_equipos, index=False, engine='openpyxl')
-            print(f"[INFO] Base de datos de equipos creada en: {self.ruta_equipos}")
+        try:
+            if not self.ruta_equipos.exists():
+                # Asegurar que el directorio existe
+                self.ruta_equipos.parent.mkdir(parents=True, exist_ok=True)
+                
+                df_equipos = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+                df_equipos.to_excel(self.ruta_equipos, index=False, engine='openpyxl')
+                print(f"[INFO] Base de datos de equipos creada en: {self.ruta_equipos}")
+            elif not self._validar_integridad_db(self.ruta_equipos, COLUMNAS_EQUIPOS):
+                # Si existe pero está corrupta, recrearla
+                print(f"[WARNING] Base de datos de equipos corrupta, recreando...")
+                self.ruta_equipos.unlink()
+                df_equipos = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+                df_equipos.to_excel(self.ruta_equipos, index=False, engine='openpyxl')
+                print(f"[INFO] Base de datos de equipos recreada")
+        except PermissionError:
+            print(f"[ERROR] Permiso denegado para crear: {self.ruta_equipos}")
+            raise
+        except Exception as e:
+            print(f"[ERROR] Error inesperado al crear DB de equipos: {type(e).__name__}: {e}")
+            raise
+    
+    def _validar_integridad_db(self, ruta: Path, columnas_esperadas: list) -> bool:
+        """
+        Valida que el archivo Excel tenga las columnas esperadas.
+        
+        Args:
+            ruta: Ruta al archivo Excel.
+            columnas_esperadas: Lista de columnas que se esperan.
+        
+        Returns:
+            True si la DB es válida, False si está corrupta.
+        """
+        try:
+            df = pd.read_excel(ruta, engine='openpyxl', nrows=0)
+            # Verificar que al menos tenga las columnas clave
+            for col in columnas_esperadas[:3]:  # Verificar primeras 3 columnas
+                if col not in df.columns:
+                    return False
+            return True
+        except:
+            return False
     
     def _leer_datos(self) -> pd.DataFrame:
         """
         Lee todos los datos del archivo Excel y los retorna como DataFrame.
         
         Returns:
-            DataFrame con todos los tickets almacenados.
-        
-        Raises:
-            FileNotFoundError: Si el archivo no existe.
+            DataFrame con todos los tickets almacenados. Retorna vacío si hay error.
         """
-        try:
-            df = pd.read_excel(self.ruta_excel, engine='openpyxl')
-            # Asegurar tipos de datos correctos
-            for col in ["FECHA_APERTURA", "FECHA_CIERRE", "ULTIMA_ACTIVIDAD"]:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
-            # Manejar columnas numéricas
-            for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-            # Manejar columnas de texto que pueden estar como float64
-            for col in ["TECNICO_ASIGNADO", "NOTAS_RESOLUCION"]:
-                if col in df.columns:
-                    df[col] = df[col].fillna("").astype(str)
-                    df[col] = df[col].replace("nan", "")
-            return df
-        except FileNotFoundError:
-            # Si el archivo no existe, lo creamos y retornamos vacío
-            self._asegurar_existencia_db()
-            return pd.DataFrame(columns=COLUMNAS_DB)
-        except Exception as e:
-            print(f"[ERROR] Error leyendo base de datos: {e}")
-            return pd.DataFrame(columns=COLUMNAS_DB)
+        max_intentos = 3
+        for intento in range(max_intentos):
+            try:
+                # Verificar que el archivo existe
+                if not self.ruta_excel.exists():
+                    print(f"[WARNING] Archivo de tickets no existe, creando...")
+                    self._asegurar_existencia_db()
+                    return pd.DataFrame(columns=COLUMNAS_DB)
+                
+                # Intentar leer el archivo
+                df = pd.read_excel(self.ruta_excel, engine='openpyxl')
+                
+                # Si el DataFrame está vacío, retornar con columnas correctas
+                if df.empty:
+                    df = pd.DataFrame(columns=COLUMNAS_DB)
+                    return df
+                
+                # Asegurar tipos de datos correctos
+                for col in ["FECHA_APERTURA", "FECHA_CIERRE", "ULTIMA_ACTIVIDAD"]:
+                    if col in df.columns:
+                        try:
+                            df[col] = pd.to_datetime(df[col], errors='coerce')
+                        except:
+                            continue
+                
+                # Manejar columnas numéricas
+                for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
+                    if col in df.columns:
+                        try:
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                        except:
+                            continue
+                
+                # Manejar columnas de texto
+                for col in ["TECNICO_ASIGNADO", "NOTAS_RESOLUCION"]:
+                    if col in df.columns:
+                        try:
+                            df[col] = df[col].fillna("").astype(str)
+                            df[col] = df[col].replace("nan", "")
+                        except:
+                            continue
+                
+                return df
+                
+            except PermissionError:
+                if intento < max_intentos - 1:
+                    print(f"[WARNING] Permiso denegado al leer DB, reintentando ({intento + 1}/{max_intentos})...")
+                    time.sleep(0.5)
+                    continue
+                else:
+                    print(f"[ERROR] Permiso denegado después de {max_intentos} intentos")
+                    return pd.DataFrame(columns=COLUMNAS_DB)
+            
+            except Exception as e:
+                if intento < max_intentos - 1:
+                    print(f"[WARNING] Error leyendo DB: {type(e).__name__}, reintentando ({intento + 1}/{max_intentos})...")
+                    time.sleep(0.5)
+                    continue
+                else:
+                    print(f"[ERROR] Error al leer base de datos después de {max_intentos} intentos: {e}")
+                    return pd.DataFrame(columns=COLUMNAS_DB)
     
     def _escribir_datos(self, df: pd.DataFrame, reintentos: int = MAX_REINTENTOS) -> bool:
         """
@@ -310,27 +446,49 @@ class GestorTickets:
     # =========================================================================
     
     def _leer_tecnicos(self) -> pd.DataFrame:
-        """Lee la base de datos de técnicos."""
-        try:
-            df = pd.read_excel(self.ruta_tecnicos, engine='openpyxl')
-            # Manejar columnas de fecha
-            if "ULTIMA_ACTIVIDAD" in df.columns:
-                df["ULTIMA_ACTIVIDAD"] = pd.to_datetime(df["ULTIMA_ACTIVIDAD"], errors='coerce')
-            # Manejar columnas numéricas
-            if "TICKETS_ATENDIDOS" in df.columns:
-                df["TICKETS_ATENDIDOS"] = pd.to_numeric(df["TICKETS_ATENDIDOS"], errors='coerce').fillna(0).astype(int)
-            # Asegurar que TICKET_ACTUAL sea string para evitar problemas con float64
-            if "TICKET_ACTUAL" in df.columns:
-                df["TICKET_ACTUAL"] = df["TICKET_ACTUAL"].fillna("").astype(str)
-                df["TICKET_ACTUAL"] = df["TICKET_ACTUAL"].replace("nan", "")
-            return df
-        except FileNotFoundError:
-            self._asegurar_existencia_tecnicos()
-            return pd.read_excel(self.ruta_tecnicos, engine='openpyxl')
-        except Exception as e:
-            print(f"[ERROR] Error leyendo técnicos: {e}")
-            self._asegurar_existencia_tecnicos()
-            return pd.read_excel(self.ruta_tecnicos, engine='openpyxl')
+        """Lee la base de datos de técnicos con reintentos."""
+        max_intentos = 3
+        for intento in range(max_intentos):
+            try:
+                if not self.ruta_tecnicos.exists():
+                    self._asegurar_existencia_tecnicos()
+                    return pd.DataFrame(columns=COLUMNAS_TECNICOS)
+                
+                df = pd.read_excel(self.ruta_tecnicos, engine='openpyxl')
+                
+                if df.empty:
+                    return pd.DataFrame(columns=COLUMNAS_TECNICOS)
+                
+                if "ULTIMA_ACTIVIDAD" in df.columns:
+                    try:
+                        df["ULTIMA_ACTIVIDAD"] = pd.to_datetime(df["ULTIMA_ACTIVIDAD"], errors='coerce')
+                    except:
+                        pass
+                if "TICKETS_ATENDIDOS" in df.columns:
+                    try:
+                        df["TICKETS_ATENDIDOS"] = pd.to_numeric(df["TICKETS_ATENDIDOS"], errors='coerce').fillna(0).astype(int)
+                    except:
+                        pass
+                if "TICKET_ACTUAL" in df.columns:
+                    try:
+                        df["TICKET_ACTUAL"] = df["TICKET_ACTUAL"].fillna("").astype(str)
+                        df["TICKET_ACTUAL"] = df["TICKET_ACTUAL"].replace("nan", "")
+                    except:
+                        pass
+                return df
+            except PermissionError:
+                if intento < max_intentos - 1:
+                    print(f"[WARNING] Permiso al leer técnicos, reintentando...")
+                    time.sleep(0.5)
+                    continue
+                return pd.DataFrame(columns=COLUMNAS_TECNICOS)
+            except Exception as e:
+                if intento < max_intentos - 1:
+                    print(f"[WARNING] Error técnicos: {type(e).__name__}")
+                    time.sleep(0.5)
+                    continue
+                print(f"[ERROR] Técnicos: {e}")
+                return pd.DataFrame(columns=COLUMNAS_TECNICOS)
 
     def _escribir_tecnicos(self, df: pd.DataFrame) -> bool:
         """Escribe la base de datos de técnicos."""
@@ -680,24 +838,47 @@ class GestorTickets:
     # =========================================================================
     
     def _leer_equipos(self) -> pd.DataFrame:
-        """Lee la base de datos de equipos."""
-        try:
-            df = pd.read_excel(self.ruta_equipos, engine='openpyxl')
-            # Manejar columnas de fecha
-            for col in ["FECHA_COMPRA", "GARANTIA_HASTA", "FECHA_REGISTRO", "ULTIMA_CONEXION"]:
-                if col in df.columns:
-                    df[col] = pd.to_datetime(df[col], errors='coerce')
-            # Manejar columnas numéricas
-            for col in ["RAM_GB", "DISCO_GB", "TOTAL_TICKETS"]:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-            return df
-        except FileNotFoundError:
-            self._asegurar_existencia_equipos()
-            return pd.DataFrame(columns=COLUMNAS_EQUIPOS)
-        except Exception as e:
-            print(f"[ERROR] Error leyendo equipos: {e}")
-            return pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+        """Lee la base de datos de equipos con reintentos."""
+        max_intentos = 3
+        for intento in range(max_intentos):
+            try:
+                if not self.ruta_equipos.exists():
+                    self._asegurar_existencia_equipos()
+                    return pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+                
+                df = pd.read_excel(self.ruta_equipos, engine='openpyxl')
+                
+                if df.empty:
+                    return pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+                
+                for col in ["FECHA_COMPRA", "GARANTIA_HASTA", "FECHA_REGISTRO", "ULTIMA_CONEXION"]:
+                    if col in df.columns:
+                        try:
+                            df[col] = pd.to_datetime(df[col], errors='coerce')
+                        except:
+                            pass
+                
+                for col in ["RAM_GB", "DISCO_GB", "TOTAL_TICKETS"]:
+                    if col in df.columns:
+                        try:
+                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                        except:
+                            pass
+                
+                return df
+            except PermissionError:
+                if intento < max_intentos - 1:
+                    print(f"[WARNING] Permiso al leer equipos, reintentando...")
+                    time.sleep(0.5)
+                    continue
+                return pd.DataFrame(columns=COLUMNAS_EQUIPOS)
+            except Exception as e:
+                if intento < max_intentos - 1:
+                    print(f"[WARNING] Error equipos: {type(e).__name__}")
+                    time.sleep(0.5)
+                    continue
+                print(f"[ERROR] Equipos: {e}")
+                return pd.DataFrame(columns=COLUMNAS_EQUIPOS)
     
     def _escribir_equipos(self, df: pd.DataFrame) -> bool:
         """Escribe la base de datos de equipos."""

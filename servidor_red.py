@@ -168,6 +168,8 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length).decode('utf-8')
         
+        print(f"[SERVIDOR] 📥 POST recibido en: {self.path}")
+        
         try:
             datos = json.loads(body)
         except:
@@ -175,6 +177,7 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             return
         
         if self.path == "/ticket/crear":
+            print(f"[SERVIDOR] 🎫 Petición de crear ticket recibida!")
             self._crear_ticket(datos)
         elif self.path == "/equipo/registrar":
             self._registrar_equipo(datos)
@@ -213,44 +216,53 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 prioridad=datos.get("prioridad", "Media")
             )
             
+            print(f"[SERVIDOR] ✅ Ticket creado: {ticket.get('TURNO', 'N/A')}")
+            print(f"[SERVIDOR] NOTIFICACIONES_DISPONIBLES = {NOTIFICACIONES_DISPONIBLES}")
+            
             # ===== NOTIFICACIÓN DE WINDOWS (igual que recordatorio) =====
-            if NOTIFICACIONES_DISPONIBLES:
-                try:
-                    from winotify import Notification, audio
-                    
-                    turno = ticket.get("TURNO", "N/A")
-                    categoria = ticket.get("CATEGORIA", "General")
-                    usuario = ticket.get("USUARIO_AD", "")
-                    prioridad = ticket.get("PRIORIDAD", "Media")
-                    
-                    # Emoji según prioridad
-                    emoji = "🎫"
-                    if prioridad == "Crítica":
-                        emoji = "🚨"
-                    elif prioridad == "Alta":
-                        emoji = "⚠️"
-                    
-                    notif = Notification(
-                        app_id="Soporte Técnico",
-                        title=f"{emoji} Nuevo Ticket - Turno {turno}",
-                        msg=f"Usuario: {usuario}\nCategoría: {categoria}\nPrioridad: {prioridad}",
-                        duration="long"
-                    )
-                    
-                    # Audio según prioridad
-                    if prioridad in ["Crítica", "Alta"]:
-                        notif.set_audio(audio.Reminder, loop=False)
-                    else:
-                        notif.set_audio(audio.Default, loop=False)
-                    
-                    notif.show()
-                    print(f"[SERVIDOR] 🔔 Notificación Windows: Nuevo ticket {turno}")
-                except Exception as e:
-                    print(f"[SERVIDOR] Error en notificación ticket: {e}")
+            try:
+                from winotify import Notification, audio
+                
+                turno = ticket.get("TURNO", "N/A")
+                categoria = ticket.get("CATEGORIA", "General")
+                usuario = ticket.get("USUARIO_AD", "")
+                prioridad = ticket.get("PRIORIDAD", "Media")
+                
+                # Emoji según prioridad
+                emoji = "🎫"
+                if prioridad == "Crítica":
+                    emoji = "🚨"
+                elif prioridad == "Alta":
+                    emoji = "⚠️"
+                
+                print(f"[SERVIDOR] Creando notificación para ticket {turno}...")
+                
+                notif = Notification(
+                    app_id="Soporte Técnico",
+                    title=f"{emoji} Nuevo Ticket - Turno {turno}",
+                    msg=f"Usuario: {usuario}\nCategoría: {categoria}\nPrioridad: {prioridad}",
+                    duration="long"
+                )
+                
+                # Audio según prioridad
+                if prioridad in ["Crítica", "Alta"]:
+                    notif.set_audio(audio.Reminder, loop=False)
+                else:
+                    notif.set_audio(audio.Default, loop=False)
+                
+                notif.show()
+                print(f"[SERVIDOR] 🔔 Notificación Windows enviada: Nuevo ticket {turno}")
+            except Exception as e:
+                import traceback
+                print(f"[SERVIDOR] ❌ Error en notificación ticket: {e}")
+                traceback.print_exc()
             
             # Agregar a la cola de mensajes para la UI
             if _callback_nuevo_ticket:
+                print(f"[SERVIDOR] Agregando ticket a cola de mensajes...")
                 _cola_mensajes.put(("ticket", ticket))
+            else:
+                print(f"[SERVIDOR] ⚠️ No hay callback de nuevo ticket configurado")
             
             self._enviar_json(200, {"success": True, "ticket": ticket})
             
@@ -678,7 +690,12 @@ def _cargar_solicitudes():
     try:
         if ARCHIVO_SOLICITUDES.exists():
             with open(ARCHIVO_SOLICITUDES, 'r', encoding='utf-8') as f:
-                _solicitudes_pendientes = json.load(f)
+                datos = json.load(f)
+                # Asegurar que sea un diccionario, no una lista
+                if isinstance(datos, dict):
+                    _solicitudes_pendientes = datos
+                else:
+                    _solicitudes_pendientes = {}
     except:
         _solicitudes_pendientes = {}
 
@@ -698,7 +715,12 @@ def _cargar_equipos_aprobados():
     try:
         if ARCHIVO_EQUIPOS_APROBADOS.exists():
             with open(ARCHIVO_EQUIPOS_APROBADOS, 'r', encoding='utf-8') as f:
-                _equipos_aprobados = json.load(f)
+                datos = json.load(f)
+                # Asegurar que sea un diccionario, no una lista
+                if isinstance(datos, dict):
+                    _equipos_aprobados = datos
+                else:
+                    _equipos_aprobados = {}
     except:
         _equipos_aprobados = {}
 

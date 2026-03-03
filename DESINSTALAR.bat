@@ -7,7 +7,7 @@ echo ╔════════════════════════
 echo ║              DESINSTALADOR - SISTEMA DE TICKETS            ║
 echo ╚════════════════════════════════════════════════════════════╝
 echo.
-echo ¿Está seguro de que desea desinstalar Tickets IT - Emisora?
+echo ¿Está seguro de que desea desinstalar Tickets IT - Receptora (Panel IT)?
 echo.
 echo Esto eliminará:
 echo   - Accesos directos del escritorio
@@ -22,9 +22,9 @@ if /i "%confirmar%"=="SI" (
     echo.
     echo Eliminando accesos directos...
     
-    del "%USERPROFILE%\Desktop\Tickets IT - Emisora.lnk" 2>nul
-    del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Sistema Tickets IT\Tickets IT - Emisora.lnk" 2>nul
-    del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Tickets IT - Emisora.lnk" 2>nul
+    del "%USERPROFILE%\Desktop\Tickets IT - Receptora (Panel IT).lnk" 2>nul
+    del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Sistema Tickets IT\Tickets IT - Receptora (Panel IT).lnk" 2>nul
+    del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\Tickets IT - Receptora (Panel IT).lnk" 2>nul
     rmdir "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Sistema Tickets IT" 2>nul
     
     echo Eliminando reglas de firewall...
