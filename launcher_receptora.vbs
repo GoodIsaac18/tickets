@@ -1,5 +1,3 @@
 Set WshShell = CreateObject("WScript.Shell")
-strPath = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
-WshShell.CurrentDirectory = strPath
-WshShell.Run Chr(34) & strPath & "\ejecutar_receptora.bat" & Chr(34), 0, False
-Set WshShell = Nothing
+WshShell.CurrentDirectory = "C:\Users\PROTECNICA\Desktop\tickets\tickets\tickets"
+WshShell.Run """C:\Users\PROTECNICA\Desktop\tickets\tickets\tickets\python_embed\python.exe"" ""C:\Users\PROTECNICA\Desktop\tickets\tickets\tickets\app_receptora.py""", 0, False

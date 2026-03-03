@@ -150,6 +150,12 @@ TECNICOS_EQUIPO = [
 MAX_REINTENTOS = 3
 TIEMPO_ESPERA_REINTENTO = 2
 
+# Lock global para operaciones de archivos Excel (protección contra race conditions)
+import threading
+_lock_tickets_db = threading.RLock()
+_lock_tecnicos_db = threading.RLock()
+_lock_equipos_db = threading.RLock()
+
 
 # =============================================================================
 # CLASE PRINCIPAL DE ACCESO A DATOS
@@ -162,6 +168,7 @@ class GestorTickets:
     
     Implementa el patrón Repository para separar la lógica de datos
     de la lógica de presentación. Incluye gestión de técnicos, turnos y equipos.
+    Thread-safe con locks para operaciones concurrentes.
     """
     
     def __init__(self, ruta_excel: Path = EXCEL_DB_PATH, ruta_tecnicos: Path = TECNICOS_DB_PATH, ruta_equipos: Path = EQUIPOS_DB_PATH):
@@ -324,75 +331,78 @@ class GestorTickets:
     def _leer_datos(self) -> pd.DataFrame:
         """
         Lee todos los datos del archivo Excel y los retorna como DataFrame.
+        Thread-safe con lock.
         
         Returns:
             DataFrame con todos los tickets almacenados. Retorna vacío si hay error.
         """
-        max_intentos = 3
-        for intento in range(max_intentos):
-            try:
-                # Verificar que el archivo existe
-                if not self.ruta_excel.exists():
-                    print(f"[WARNING] Archivo de tickets no existe, creando...")
-                    self._asegurar_existencia_db()
-                    return pd.DataFrame(columns=COLUMNAS_DB)
-                
-                # Intentar leer el archivo
-                df = pd.read_excel(self.ruta_excel, engine='openpyxl')
-                
-                # Si el DataFrame está vacío, retornar con columnas correctas
-                if df.empty:
-                    df = pd.DataFrame(columns=COLUMNAS_DB)
+        with _lock_tickets_db:
+            max_intentos = 3
+            for intento in range(max_intentos):
+                try:
+                    # Verificar que el archivo existe
+                    if not self.ruta_excel.exists():
+                        print(f"[WARNING] Archivo de tickets no existe, creando...")
+                        self._asegurar_existencia_db()
+                        return pd.DataFrame(columns=COLUMNAS_DB)
+                    
+                    # Intentar leer el archivo
+                    df = pd.read_excel(self.ruta_excel, engine='openpyxl')
+                    
+                    # Si el DataFrame está vacío, retornar con columnas correctas
+                    if df.empty:
+                        df = pd.DataFrame(columns=COLUMNAS_DB)
+                        return df
+                    
+                    # Asegurar tipos de datos correctos
+                    for col in ["FECHA_APERTURA", "FECHA_CIERRE", "ULTIMA_ACTIVIDAD"]:
+                        if col in df.columns:
+                            try:
+                                df[col] = pd.to_datetime(df[col], errors='coerce')
+                            except:
+                                continue
+                    
+                    # Manejar columnas numéricas
+                    for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
+                        if col in df.columns:
+                            try:
+                                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                            except:
+                                continue
+                    
+                    # Manejar columnas de texto
+                    for col in ["TECNICO_ASIGNADO", "NOTAS_RESOLUCION"]:
+                        if col in df.columns:
+                            try:
+                                df[col] = df[col].fillna("").astype(str)
+                                df[col] = df[col].replace("nan", "")
+                            except:
+                                continue
+                    
                     return df
+                    
+                except PermissionError:
+                    if intento < max_intentos - 1:
+                        print(f"[WARNING] Permiso denegado al leer DB, reintentando ({intento + 1}/{max_intentos})...")
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        print(f"[ERROR] Permiso denegado después de {max_intentos} intentos")
+                        return pd.DataFrame(columns=COLUMNAS_DB)
                 
-                # Asegurar tipos de datos correctos
-                for col in ["FECHA_APERTURA", "FECHA_CIERRE", "ULTIMA_ACTIVIDAD"]:
-                    if col in df.columns:
-                        try:
-                            df[col] = pd.to_datetime(df[col], errors='coerce')
-                        except:
-                            continue
-                
-                # Manejar columnas numéricas
-                for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
-                    if col in df.columns:
-                        try:
-                            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-                        except:
-                            continue
-                
-                # Manejar columnas de texto
-                for col in ["TECNICO_ASIGNADO", "NOTAS_RESOLUCION"]:
-                    if col in df.columns:
-                        try:
-                            df[col] = df[col].fillna("").astype(str)
-                            df[col] = df[col].replace("nan", "")
-                        except:
-                            continue
-                
-                return df
-                
-            except PermissionError:
-                if intento < max_intentos - 1:
-                    print(f"[WARNING] Permiso denegado al leer DB, reintentando ({intento + 1}/{max_intentos})...")
-                    time.sleep(0.5)
-                    continue
-                else:
-                    print(f"[ERROR] Permiso denegado después de {max_intentos} intentos")
-                    return pd.DataFrame(columns=COLUMNAS_DB)
-            
-            except Exception as e:
-                if intento < max_intentos - 1:
-                    print(f"[WARNING] Error leyendo DB: {type(e).__name__}, reintentando ({intento + 1}/{max_intentos})...")
-                    time.sleep(0.5)
-                    continue
-                else:
-                    print(f"[ERROR] Error al leer base de datos después de {max_intentos} intentos: {e}")
-                    return pd.DataFrame(columns=COLUMNAS_DB)
+                except Exception as e:
+                    if intento < max_intentos - 1:
+                        print(f"[WARNING] Error leyendo DB: {type(e).__name__}, reintentando ({intento + 1}/{max_intentos})...")
+                        time.sleep(0.5)
+                        continue
+                    else:
+                        print(f"[ERROR] Error al leer base de datos después de {max_intentos} intentos: {e}")
+                        return pd.DataFrame(columns=COLUMNAS_DB)
     
     def _escribir_datos(self, df: pd.DataFrame, reintentos: int = MAX_REINTENTOS) -> bool:
         """
         Escribe el DataFrame completo al archivo Excel.
+        Thread-safe con lock.
         
         Implementa lógica de reintentos para manejar casos donde
         el archivo está bloqueado por otro usuario.
@@ -407,39 +417,40 @@ class GestorTickets:
         Raises:
             PermissionError: Si después de todos los reintentos no se puede escribir.
         """
-        # Convertir fechas a string para evitar problemas de Excel
-        df_copy = df.copy()
-        for col in ["FECHA_APERTURA", "FECHA_CIERRE", "ULTIMA_ACTIVIDAD"]:
-            if col in df_copy.columns:
-                df_copy[col] = df_copy[col].apply(
-                    lambda x: x.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(x) and hasattr(x, 'strftime') else (str(x) if pd.notna(x) else "")
-                )
-        
-        # Manejar columnas numéricas - convertir valores vacíos/None a 0
-        for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
-            if col in df_copy.columns:
-                # Reemplazar None, NaN y strings vacíos con 0, luego convertir a int
-                df_copy[col] = df_copy[col].fillna(0)
-                df_copy[col] = df_copy[col].replace("", 0)
-                df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(0).astype(int)
-        
-        for intento in range(reintentos):
-            try:
-                df_copy.to_excel(self.ruta_excel, index=False, engine='openpyxl')
-                return True
-            except PermissionError:
-                if intento < reintentos - 1:
-                    print(f"[AVISO] Archivo bloqueado. Reintentando en {TIEMPO_ESPERA_REINTENTO}s... ({intento + 1}/{reintentos})")
-                    time.sleep(TIEMPO_ESPERA_REINTENTO)
-                else:
-                    raise PermissionError(
-                        f"No se pudo acceder al archivo después de {reintentos} intentos. "
-                        "Por favor, cierre el archivo Excel si está abierto."
+        with _lock_tickets_db:
+            # Convertir fechas a string para evitar problemas de Excel
+            df_copy = df.copy()
+            for col in ["FECHA_APERTURA", "FECHA_CIERRE", "ULTIMA_ACTIVIDAD"]:
+                if col in df_copy.columns:
+                    df_copy[col] = df_copy[col].apply(
+                        lambda x: x.strftime("%Y-%m-%d %H:%M:%S") if pd.notna(x) and hasattr(x, 'strftime') else (str(x) if pd.notna(x) else "")
                     )
-            except Exception as e:
-                print(f"[ERROR] Error escribiendo datos: {e}")
-                return False
-        return False
+            
+            # Manejar columnas numéricas - convertir valores vacíos/None a 0
+            for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
+                if col in df_copy.columns:
+                    # Reemplazar None, NaN y strings vacíos con 0, luego convertir a int
+                    df_copy[col] = df_copy[col].fillna(0)
+                    df_copy[col] = df_copy[col].replace("", 0)
+                    df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').fillna(0).astype(int)
+            
+            for intento in range(reintentos):
+                try:
+                    df_copy.to_excel(self.ruta_excel, index=False, engine='openpyxl')
+                    return True
+                except PermissionError:
+                    if intento < reintentos - 1:
+                        print(f"[AVISO] Archivo bloqueado. Reintentando en {TIEMPO_ESPERA_REINTENTO}s... ({intento + 1}/{reintentos})")
+                        time.sleep(TIEMPO_ESPERA_REINTENTO)
+                    else:
+                        raise PermissionError(
+                            f"No se pudo acceder al archivo después de {reintentos} intentos. "
+                            "Por favor, cierre el archivo Excel si está abierto."
+                        )
+                except Exception as e:
+                    print(f"[ERROR] Error escribiendo datos: {e}")
+                    return False
+            return False
     
     # =========================================================================
     # FUNCIONES DE GESTIÓN DE TÉCNICOS

@@ -49,6 +49,14 @@ MAX_WORKERS = 20
 HEARTBEAT_INTERVAL = 30  # segundos
 TIMEOUT_EQUIPO = 90  # segundos sin heartbeat = offline
 
+# === PROTECCIÓN CONTRA SOBRECARGA ===
+MAX_COLA_MENSAJES = 1000          # Límite de mensajes en cola
+MAX_CONEXIONES_ACTIVAS = 50       # Máximo conexiones simultáneas
+RATE_LIMIT_VENTANA = 60           # Ventana de tiempo en segundos
+RATE_LIMIT_MAX_PETICIONES = 120   # Máximo peticiones por IP en la ventana
+RATE_LIMIT_TICKETS_POR_MAC = 10   # Máximo tickets por MAC en 5 minutos
+DEBOUNCE_ESCRITURA_MS = 500       # Milisegundos para agrupar escrituras
+
 # =============================================================================
 # ESTADO GLOBAL
 # =============================================================================
@@ -65,9 +73,111 @@ _callback_equipo_desconectado: Optional[Callable] = None
 _equipos_conectados: Dict[str, Dict] = {}
 _lock_equipos = threading.RLock()
 
-# Cola de mensajes para procesar en segundo plano
-_cola_mensajes = queue.Queue()
+# Cola de mensajes para procesar en segundo plano (CON LÍMITE)
+_cola_mensajes = queue.Queue(maxsize=MAX_COLA_MENSAJES)
 _procesador_activo = False
+
+# === SISTEMA DE RATE LIMITING ===
+_rate_limit_por_ip: Dict[str, List[float]] = {}  # {ip: [timestamps]}
+_rate_limit_tickets_por_mac: Dict[str, List[float]] = {}  # {mac: [timestamps]}
+_lock_rate_limit = threading.RLock()
+
+# === CONEXIONES ACTIVAS ===
+_conexiones_activas = 0
+_lock_conexiones = threading.Lock()
+_semaforo_conexiones = threading.Semaphore(MAX_CONEXIONES_ACTIVAS)
+
+# === CACHE DE GESTOR TICKETS (SINGLETON) ===
+_gestor_tickets_cache = None
+_lock_gestor = threading.Lock()
+
+# === DEBOUNCING DE ESCRITURA ===
+_escrituras_pendientes: Dict[str, Dict] = {}  # {archivo: {datos, timer}}
+_lock_escrituras = threading.Lock()
+
+
+def _obtener_gestor_tickets():
+    """Obtiene una instancia singleton del GestorTickets."""
+    global _gestor_tickets_cache
+    if _gestor_tickets_cache is None:
+        with _lock_gestor:
+            if _gestor_tickets_cache is None:
+                try:
+                    from data_access import GestorTickets
+                    _gestor_tickets_cache = GestorTickets()
+                except Exception as e:
+                    print(f"[ERROR] No se pudo crear GestorTickets: {e}")
+                    return None
+    return _gestor_tickets_cache
+
+
+def _verificar_rate_limit(ip: str, tipo: str = "general") -> bool:
+    """
+    Verifica si una IP ha excedido el límite de peticiones.
+    
+    Returns:
+        True si está dentro del límite, False si excedió.
+    """
+    with _lock_rate_limit:
+        ahora = time.time()
+        
+        # Limpiar timestamps antiguos
+        if ip in _rate_limit_por_ip:
+            _rate_limit_por_ip[ip] = [
+                t for t in _rate_limit_por_ip[ip] 
+                if ahora - t < RATE_LIMIT_VENTANA
+            ]
+        else:
+            _rate_limit_por_ip[ip] = []
+        
+        # Verificar límite
+        if len(_rate_limit_por_ip[ip]) >= RATE_LIMIT_MAX_PETICIONES:
+            return False
+        
+        # Registrar nueva petición
+        _rate_limit_por_ip[ip].append(ahora)
+        return True
+
+
+def _verificar_rate_limit_ticket(mac: str) -> bool:
+    """
+    Verifica si una MAC ha excedido el límite de creación de tickets.
+    
+    Returns:
+        True si puede crear ticket, False si excedió límite.
+    """
+    with _lock_rate_limit:
+        ahora = time.time()
+        ventana = 300  # 5 minutos
+        
+        if mac in _rate_limit_tickets_por_mac:
+            _rate_limit_tickets_por_mac[mac] = [
+                t for t in _rate_limit_tickets_por_mac[mac]
+                if ahora - t < ventana
+            ]
+        else:
+            _rate_limit_tickets_por_mac[mac] = []
+        
+        if len(_rate_limit_tickets_por_mac[mac]) >= RATE_LIMIT_TICKETS_POR_MAC:
+            return False
+        
+        _rate_limit_tickets_por_mac[mac].append(ahora)
+        return True
+
+
+def _agregar_a_cola_seguro(tipo: str, datos: Any) -> bool:
+    """
+    Agrega un mensaje a la cola de forma segura (no bloqueante).
+    
+    Returns:
+        True si se agregó, False si la cola está llena.
+    """
+    try:
+        _cola_mensajes.put_nowait((tipo, datos))
+        return True
+    except queue.Full:
+        print(f"[WARNING] Cola de mensajes llena, descartando mensaje tipo: {tipo}")
+        return False
 
 # =============================================================================
 # SISTEMA DE SOLICITUDES DE ENLACE
@@ -93,27 +203,64 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Servidor HTTP con soporte para múltiples conexiones simultáneas."""
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 100  # Limitar cola de conexiones pendientes
 
 
 class TicketRequestHandler(BaseHTTPRequestHandler):
-    """Manejador de peticiones HTTP optimizado."""
+    """Manejador de peticiones HTTP optimizado con rate limiting."""
     
     protocol_version = 'HTTP/1.1'
+    timeout = 30  # Timeout de conexión en segundos
     
     def log_message(self, format, *args):
         pass
     
+    def setup(self):
+        """Configuración inicial con control de conexiones."""
+        # Adquirir semáforo (limitar conexiones)
+        if not _semaforo_conexiones.acquire(timeout=5):
+            raise ConnectionRefusedError("Servidor sobrecargado")
+        super().setup()
+    
+    def finish(self):
+        """Limpieza con liberación de semáforo."""
+        try:
+            super().finish()
+        finally:
+            _semaforo_conexiones.release()
+    
+    def _verificar_rate_limit_peticion(self) -> bool:
+        """Verifica rate limiting para la petición actual."""
+        ip = self.client_address[0]
+        if not _verificar_rate_limit(ip):
+            self._enviar_json(429, {
+                "error": "Demasiadas peticiones. Intente más tarde.",
+                "retry_after": RATE_LIMIT_VENTANA
+            })
+            return False
+        return True
+    
     def _enviar_json(self, codigo: int, datos: dict):
-        contenido = json.dumps(datos, ensure_ascii=False, default=str).encode('utf-8')
-        self.send_response(codigo)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Content-Length', len(contenido))
-        self.send_header('Connection', 'keep-alive')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(contenido)
+        try:
+            contenido = json.dumps(datos, ensure_ascii=False, default=str).encode('utf-8')
+            self.send_response(codigo)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', len(contenido))
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(contenido)
+        except (BrokenPipeError, ConnectionResetError):
+            # Cliente cerró conexión
+            pass
+        except Exception as e:
+            print(f"[ERROR] Error enviando respuesta: {e}")
     
     def do_GET(self):
+        # Verificar rate limit
+        if not self._verificar_rate_limit_peticion():
+            return
+        
         if self.path == "/ping":
             self._enviar_json(200, {
                 "status": "ok",
@@ -123,10 +270,12 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
         
         elif self.path == "/estado":
             try:
-                from data_access import GestorTickets
-                gestor = GestorTickets()
-                estado = gestor.obtener_mensaje_estado_sistema()
-                self._enviar_json(200, estado)
+                gestor = _obtener_gestor_tickets()
+                if gestor:
+                    estado = gestor.obtener_mensaje_estado_sistema()
+                    self._enviar_json(200, estado)
+                else:
+                    self._enviar_json(503, {"error": "Servicio no disponible"})
             except Exception as e:
                 self._enviar_json(500, {"error": str(e)})
         
@@ -140,10 +289,12 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
         
         elif self.path == "/tecnicos":
             try:
-                from data_access import GestorTickets
-                gestor = GestorTickets()
-                tecnicos = gestor.obtener_tecnicos()
-                self._enviar_json(200, {"tecnicos": tecnicos.to_dict('records')})
+                gestor = _obtener_gestor_tickets()
+                if gestor:
+                    tecnicos = gestor.obtener_tecnicos()
+                    self._enviar_json(200, {"tecnicos": tecnicos.to_dict('records')})
+                else:
+                    self._enviar_json(503, {"error": "Servicio no disponible"})
             except Exception as e:
                 self._enviar_json(500, {"error": str(e)})
         
@@ -165,8 +316,19 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             self._enviar_json(404, {"error": "Ruta no encontrada"})
     
     def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length).decode('utf-8')
+        # Verificar rate limit
+        if not self._verificar_rate_limit_peticion():
+            return
+        
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 1024 * 100:  # Limitar a 100KB
+                self._enviar_json(413, {"error": "Payload demasiado grande"})
+                return
+            body = self.rfile.read(content_length).decode('utf-8')
+        except Exception as e:
+            self._enviar_json(400, {"error": f"Error leyendo datos: {e}"})
+            return
         
         print(f"[SERVIDOR] 📥 POST recibido en: {self.path}")
         
@@ -204,13 +366,25 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
     
     def _crear_ticket(self, datos: dict):
         try:
-            from data_access import GestorTickets
-            gestor = GestorTickets()
+            mac_address = datos.get("mac_address", "")
+            
+            # Verificar rate limit de tickets por MAC
+            if mac_address and not _verificar_rate_limit_ticket(mac_address):
+                self._enviar_json(429, {
+                    "error": "Ha enviado demasiados tickets. Espere unos minutos.",
+                    "retry_after": 300
+                })
+                return
+            
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"error": "Servicio no disponible"})
+                return
             
             ticket = gestor.crear_ticket(
                 usuario_ad=datos.get("usuario_ad", ""),
                 hostname=datos.get("hostname", ""),
-                mac_address=datos.get("mac_address", ""),
+                mac_address=mac_address,
                 categoria=datos.get("categoria", "Otro"),
                 descripcion=datos.get("descripcion", ""),
                 prioridad=datos.get("prioridad", "Media")
@@ -219,50 +393,46 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             print(f"[SERVIDOR] ✅ Ticket creado: {ticket.get('TURNO', 'N/A')}")
             print(f"[SERVIDOR] NOTIFICACIONES_DISPONIBLES = {NOTIFICACIONES_DISPONIBLES}")
             
-            # ===== NOTIFICACIÓN DE WINDOWS (igual que recordatorio) =====
-            try:
-                from winotify import Notification, audio
-                
-                turno = ticket.get("TURNO", "N/A")
-                categoria = ticket.get("CATEGORIA", "General")
-                usuario = ticket.get("USUARIO_AD", "")
-                prioridad = ticket.get("PRIORIDAD", "Media")
-                
-                # Emoji según prioridad
-                emoji = "🎫"
-                if prioridad == "Crítica":
-                    emoji = "🚨"
-                elif prioridad == "Alta":
-                    emoji = "⚠️"
-                
-                print(f"[SERVIDOR] Creando notificación para ticket {turno}...")
-                
-                notif = Notification(
-                    app_id="Soporte Técnico",
-                    title=f"{emoji} Nuevo Ticket - Turno {turno}",
-                    msg=f"Usuario: {usuario}\nCategoría: {categoria}\nPrioridad: {prioridad}",
-                    duration="long"
-                )
-                
-                # Audio según prioridad
-                if prioridad in ["Crítica", "Alta"]:
-                    notif.set_audio(audio.Reminder, loop=False)
-                else:
-                    notif.set_audio(audio.Default, loop=False)
-                
-                notif.show()
-                print(f"[SERVIDOR] 🔔 Notificación Windows enviada: Nuevo ticket {turno}")
-            except Exception as e:
-                import traceback
-                print(f"[SERVIDOR] ❌ Error en notificación ticket: {e}")
-                traceback.print_exc()
+            # ===== NOTIFICACIÓN DE WINDOWS (en thread separado para no bloquear) =====
+            def enviar_notificacion():
+                try:
+                    from winotify import Notification, audio
+                    
+                    turno = ticket.get("TURNO", "N/A")
+                    categoria = ticket.get("CATEGORIA", "General")
+                    usuario = ticket.get("USUARIO_AD", "")
+                    prioridad = ticket.get("PRIORIDAD", "Media")
+                    
+                    # Emoji según prioridad
+                    emoji = "🎫"
+                    if prioridad == "Crítica":
+                        emoji = "🚨"
+                    elif prioridad == "Alta":
+                        emoji = "⚠️"
+                    
+                    notif = Notification(
+                        app_id="Soporte Técnico",
+                        title=f"{emoji} Nuevo Ticket - Turno {turno}",
+                        msg=f"Usuario: {usuario}\nCategoría: {categoria}\nPrioridad: {prioridad}",
+                        duration="long"
+                    )
+                    
+                    if prioridad in ["Crítica", "Alta"]:
+                        notif.set_audio(audio.Reminder, loop=False)
+                    else:
+                        notif.set_audio(audio.Default, loop=False)
+                    
+                    notif.show()
+                    print(f"[SERVIDOR] 🔔 Notificación Windows enviada: Nuevo ticket {turno}")
+                except Exception as e:
+                    print(f"[SERVIDOR] ❌ Error en notificación ticket: {e}")
             
-            # Agregar a la cola de mensajes para la UI
+            # Enviar notificación en thread separado para no bloquear
+            threading.Thread(target=enviar_notificacion, daemon=True).start()
+            
+            # Agregar a la cola de mensajes para la UI (de forma segura)
             if _callback_nuevo_ticket:
-                print(f"[SERVIDOR] Agregando ticket a cola de mensajes...")
-                _cola_mensajes.put(("ticket", ticket))
-            else:
-                print(f"[SERVIDOR] ⚠️ No hay callback de nuevo ticket configurado")
+                _agregar_a_cola_seguro("ticket", ticket)
             
             self._enviar_json(200, {"success": True, "ticket": ticket})
             
@@ -293,8 +463,10 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
     
     def _consultar_ticket(self, datos: dict):
         try:
-            from data_access import GestorTickets
-            gestor = GestorTickets()
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"error": "Servicio no disponible"})
+                return
             
             id_ticket = datos.get("id_ticket", "")
             ticket = gestor.obtener_ticket_por_id(id_ticket)
@@ -416,8 +588,10 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 self._enviar_json(400, {"error": "ID de ticket requerido"})
                 return
             
-            from data_access import GestorTickets
-            gestor = GestorTickets()
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"error": "Servicio no disponible"})
+                return
             
             # Verificar que el ticket existe y está activo
             ticket = gestor.obtener_ticket_por_id(id_ticket)
@@ -443,28 +617,31 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             
             gestor.actualizar_ticket(id_ticket, historial=nuevo_historial)
             
-            # Notificación de Windows
-            if NOTIFICACIONES_DISPONIBLES:
-                try:
-                    from winotify import Notification, audio
-                    notif = Notification(
-                        app_id="Soporte Técnico",
-                        title=f"⏰ Recordatorio - Ticket #{ticket.get('TURNO', 'N/A')}",
-                        msg=f"{usuario} solicita atención.\n{nota if nota else 'Sin nota adicional'}",
-                        duration="long"
-                    )
-                    notif.set_audio(audio.Reminder, loop=False)
-                    notif.show()
-                except Exception as e:
-                    print(f"[SERVIDOR] Error en notificación recordatorio: {e}")
+            # Notificación de Windows (en thread separado)
+            def enviar_notif():
+                if NOTIFICACIONES_DISPONIBLES:
+                    try:
+                        from winotify import Notification, audio
+                        notif = Notification(
+                            app_id="Soporte Técnico",
+                            title=f"⏰ Recordatorio - Ticket #{ticket.get('TURNO', 'N/A')}",
+                            msg=f"{usuario} solicita atención.\n{nota if nota else 'Sin nota adicional'}",
+                            duration="long"
+                        )
+                        notif.set_audio(audio.Reminder, loop=False)
+                        notif.show()
+                    except Exception as e:
+                        print(f"[SERVIDOR] Error en notificación recordatorio: {e}")
             
-            # Agregar a la cola de mensajes para la UI
+            threading.Thread(target=enviar_notif, daemon=True).start()
+            
+            # Agregar a la cola de mensajes para la UI (de forma segura)
             if _callback_nuevo_ticket:
-                _cola_mensajes.put(("recordatorio", {
+                _agregar_a_cola_seguro("recordatorio", {
                     "ticket": ticket,
                     "nota": nota,
                     "usuario": usuario
-                }))
+                })
             
             self._enviar_json(200, {
                 "success": True,
@@ -488,8 +665,10 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 self._enviar_json(400, {"error": "ID de ticket requerido"})
                 return
             
-            from data_access import GestorTickets
-            gestor = GestorTickets()
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"error": "Servicio no disponible"})
+                return
             
             # Verificar que el ticket existe y está activo
             ticket = gestor.obtener_ticket_por_id(id_ticket)
@@ -516,28 +695,31 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 historial=nuevo_historial
             )
             
-            # Notificación de Windows
-            if NOTIFICACIONES_DISPONIBLES:
-                try:
-                    from winotify import Notification, audio
-                    notif = Notification(
-                        app_id="Soporte Técnico",
-                        title=f"❌ Ticket Cancelado - #{ticket.get('TURNO', 'N/A')}",
-                        msg=f"{usuario} canceló su solicitud.\n{nota if nota else 'Sin motivo especificado'}",
-                        duration="short"
-                    )
-                    notif.set_audio(audio.Default, loop=False)
-                    notif.show()
-                except Exception as e:
-                    print(f"[SERVIDOR] Error en notificación cancelación: {e}")
+            # Notificación de Windows (en thread separado)
+            def enviar_notif():
+                if NOTIFICACIONES_DISPONIBLES:
+                    try:
+                        from winotify import Notification, audio
+                        notif = Notification(
+                            app_id="Soporte Técnico",
+                            title=f"❌ Ticket Cancelado - #{ticket.get('TURNO', 'N/A')}",
+                            msg=f"{usuario} canceló su solicitud.\n{nota if nota else 'Sin motivo especificado'}",
+                            duration="short"
+                        )
+                        notif.set_audio(audio.Default, loop=False)
+                        notif.show()
+                    except Exception as e:
+                        print(f"[SERVIDOR] Error en notificación cancelación: {e}")
             
-            # Agregar a la cola de mensajes para la UI
+            threading.Thread(target=enviar_notif, daemon=True).start()
+            
+            # Agregar a la cola de mensajes para la UI (de forma segura)
             if _callback_nuevo_ticket:
-                _cola_mensajes.put(("cancelacion", {
+                _agregar_a_cola_seguro("cancelacion", {
                     "ticket": ticket,
                     "nota": nota,
                     "usuario": usuario
-                }))
+                })
             
             self._enviar_json(200, {
                 "success": True,
@@ -583,7 +765,7 @@ def registrar_equipo_conectado(mac_address: str, hostname: str = "",
         _equipos_conectados[mac_address] = equipo_info
         
         if es_nuevo and _callback_equipo_conectado:
-            _cola_mensajes.put(("equipo_conectado", equipo_info))
+            _agregar_a_cola_seguro("equipo_conectado", equipo_info)
         
         # Guardar en base de datos
         _guardar_equipo_db(equipo_info)
@@ -677,12 +859,16 @@ def verificar_equipos_timeout():
             info["online"] = es_online
             
             if era_online and not es_online and _callback_equipo_desconectado:
-                _cola_mensajes.put(("equipo_desconectado", info.copy()))
+                _agregar_a_cola_seguro("equipo_desconectado", info.copy())
 
 
 # =============================================================================
 # GESTIÓN DE SOLICITUDES DE ENLACE
 # =============================================================================
+
+# Timers para debouncing de escritura
+_timer_guardar_solicitudes: Optional[threading.Timer] = None
+_timer_guardar_equipos: Optional[threading.Timer] = None
 
 def _cargar_solicitudes():
     """Carga las solicitudes pendientes desde archivo."""
@@ -700,13 +886,32 @@ def _cargar_solicitudes():
         _solicitudes_pendientes = {}
 
 
-def _guardar_solicitudes():
-    """Guarda las solicitudes pendientes a archivo."""
+def _guardar_solicitudes_inmediato():
+    """Guarda las solicitudes pendientes a archivo (uso interno)."""
     try:
-        with open(ARCHIVO_SOLICITUDES, 'w', encoding='utf-8') as f:
-            json.dump(_solicitudes_pendientes, f, ensure_ascii=False, indent=2)
-    except:
-        pass
+        with _lock_solicitudes:
+            with open(ARCHIVO_SOLICITUDES, 'w', encoding='utf-8') as f:
+                json.dump(_solicitudes_pendientes, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[ERROR] Error guardando solicitudes: {e}")
+
+
+def _guardar_solicitudes():
+    """Guarda las solicitudes con debouncing (no guarda inmediatamente)."""
+    global _timer_guardar_solicitudes
+    
+    with _lock_escrituras:
+        # Cancelar timer anterior si existe
+        if _timer_guardar_solicitudes:
+            _timer_guardar_solicitudes.cancel()
+        
+        # Crear nuevo timer con debounce
+        _timer_guardar_solicitudes = threading.Timer(
+            DEBOUNCE_ESCRITURA_MS / 1000.0,
+            _guardar_solicitudes_inmediato
+        )
+        _timer_guardar_solicitudes.daemon = True
+        _timer_guardar_solicitudes.start()
 
 
 def _cargar_equipos_aprobados():
@@ -725,13 +930,32 @@ def _cargar_equipos_aprobados():
         _equipos_aprobados = {}
 
 
-def _guardar_equipos_aprobados():
-    """Guarda los equipos aprobados a archivo."""
+def _guardar_equipos_aprobados_inmediato():
+    """Guarda los equipos aprobados a archivo (uso interno)."""
     try:
-        with open(ARCHIVO_EQUIPOS_APROBADOS, 'w', encoding='utf-8') as f:
-            json.dump(_equipos_aprobados, f, ensure_ascii=False, indent=2)
-    except:
-        pass
+        with _lock_solicitudes:
+            with open(ARCHIVO_EQUIPOS_APROBADOS, 'w', encoding='utf-8') as f:
+                json.dump(_equipos_aprobados, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[ERROR] Error guardando equipos aprobados: {e}")
+
+
+def _guardar_equipos_aprobados():
+    """Guarda los equipos aprobados con debouncing."""
+    global _timer_guardar_equipos
+    
+    with _lock_escrituras:
+        # Cancelar timer anterior si existe
+        if _timer_guardar_equipos:
+            _timer_guardar_equipos.cancel()
+        
+        # Crear nuevo timer con debounce
+        _timer_guardar_equipos = threading.Timer(
+            DEBOUNCE_ESCRITURA_MS / 1000.0,
+            _guardar_equipos_aprobados_inmediato
+        )
+        _timer_guardar_equipos.daemon = True
+        _timer_guardar_equipos.start()
 
 
 def crear_solicitud_enlace(mac_address: str, hostname: str = "", 
@@ -762,18 +986,20 @@ def crear_solicitud_enlace(mac_address: str, hostname: str = "",
         _solicitudes_pendientes[mac_address] = solicitud
         _guardar_solicitudes()
         
-        # ===== NOTIFICACIÓN DE WINDOWS (para nuevas y reenvíos) =====
+        # ===== NOTIFICACIÓN DE WINDOWS (para nuevas y reenvíos, en thread separado) =====
         if (es_nueva or es_reenvio) and NOTIFICACIONES_DISPONIBLES:
-            try:
-                _notif_solicitud(solicitud)
-                tipo_msg = "Nueva solicitud" if es_nueva else "Reenvío de solicitud"
-                print(f"[SERVIDOR] 🔔 Notificación Windows: {tipo_msg} de {hostname}")
-            except Exception as e:
-                print(f"[SERVIDOR] Error en notificación: {e}")
+            def enviar_notif():
+                try:
+                    _notif_solicitud(solicitud)
+                    tipo_msg = "Nueva solicitud" if es_nueva else "Reenvío de solicitud"
+                    print(f"[SERVIDOR] 🔔 Notificación Windows: {tipo_msg} de {hostname}")
+                except Exception as e:
+                    print(f"[SERVIDOR] Error en notificación: {e}")
+            threading.Thread(target=enviar_notif, daemon=True).start()
         
         # Notificar al callback si existe (para nuevas y reenvíos)
         if _callback_nueva_solicitud and (es_nueva or es_reenvio):
-            _cola_mensajes.put(("nueva_solicitud", solicitud))
+            _agregar_a_cola_seguro("nueva_solicitud", solicitud)
         
         return solicitud
 
@@ -909,48 +1135,107 @@ def registrar_callback_nueva_solicitud(callback: Callable):
 # =============================================================================
 
 def _procesador_cola():
-    """Procesa mensajes en segundo plano."""
+    """Procesa mensajes en segundo plano con manejo robusto de errores."""
     global _procesador_activo
     _procesador_activo = True
+    errores_consecutivos = 0
+    max_errores = 10
     
     while _procesador_activo:
         try:
             tipo, datos = _cola_mensajes.get(timeout=1)
+            errores_consecutivos = 0  # Resetear contador de errores
             
             if tipo == "ticket" and _callback_nuevo_ticket:
                 try:
                     _callback_nuevo_ticket(datos)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[COLA] Error procesando ticket: {e}")
             
             elif tipo == "equipo_conectado" and _callback_equipo_conectado:
                 try:
                     _callback_equipo_conectado(datos)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[COLA] Error procesando equipo conectado: {e}")
             
             elif tipo == "equipo_desconectado" and _callback_equipo_desconectado:
                 try:
                     _callback_equipo_desconectado(datos)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[COLA] Error procesando equipo desconectado: {e}")
             
             elif tipo == "nueva_solicitud" and _callback_nueva_solicitud:
                 try:
                     _callback_nueva_solicitud(datos)
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[COLA] Error procesando solicitud: {e}")
+            
+            elif tipo == "recordatorio" and _callback_nuevo_ticket:
+                try:
+                    _callback_nuevo_ticket(datos)
+                except Exception as e:
+                    print(f"[COLA] Error procesando recordatorio: {e}")
+            
+            elif tipo == "cancelacion" and _callback_nuevo_ticket:
+                try:
+                    _callback_nuevo_ticket(datos)
+                except Exception as e:
+                    print(f"[COLA] Error procesando cancelación: {e}")
                     
         except queue.Empty:
             continue
-        except:
-            pass
+        except Exception as e:
+            errores_consecutivos += 1
+            print(f"[COLA] Error en procesador ({errores_consecutivos}/{max_errores}): {e}")
+            if errores_consecutivos >= max_errores:
+                print("[COLA] Demasiados errores, pausando 5 segundos...")
+                time.sleep(5)
+                errores_consecutivos = 0
+
+
+def _limpiar_rate_limits():
+    """Limpia entradas antiguas del rate limiter periódicamente."""
+    while _servidor_http_activo:
+        try:
+            ahora = time.time()
+            with _lock_rate_limit:
+                # Limpiar IPs sin actividad reciente
+                ips_a_eliminar = []
+                for ip, timestamps in _rate_limit_por_ip.items():
+                    _rate_limit_por_ip[ip] = [
+                        t for t in timestamps if ahora - t < RATE_LIMIT_VENTANA
+                    ]
+                    if not _rate_limit_por_ip[ip]:
+                        ips_a_eliminar.append(ip)
+                
+                for ip in ips_a_eliminar:
+                    del _rate_limit_por_ip[ip]
+                
+                # Limpiar MACs sin actividad reciente
+                macs_a_eliminar = []
+                for mac, timestamps in _rate_limit_tickets_por_mac.items():
+                    _rate_limit_tickets_por_mac[mac] = [
+                        t for t in timestamps if ahora - t < 300  # 5 minutos
+                    ]
+                    if not _rate_limit_tickets_por_mac[mac]:
+                        macs_a_eliminar.append(mac)
+                
+                for mac in macs_a_eliminar:
+                    del _rate_limit_tickets_por_mac[mac]
+                    
+        except Exception as e:
+            print(f"[RATE-LIMIT] Error limpiando: {e}")
+        
+        time.sleep(60)  # Limpiar cada minuto
 
 
 def _monitor_heartbeat():
     """Monitor de heartbeat para detectar desconexiones."""
     while _servidor_http_activo:
-        verificar_equipos_timeout()
+        try:
+            verificar_equipos_timeout()
+        except Exception as e:
+            print(f"[HEARTBEAT] Error: {e}")
         time.sleep(HEARTBEAT_INTERVAL)
 
 
@@ -1020,8 +1305,11 @@ def iniciar_servidor(puerto: int = PUERTO_HTTP,
         threading.Thread(target=_servidor_http.serve_forever, daemon=True, name="HTTP-Server").start()
         threading.Thread(target=_procesador_cola, daemon=True, name="Msg-Processor").start()
         threading.Thread(target=_monitor_heartbeat, daemon=True, name="Heartbeat-Monitor").start()
+        threading.Thread(target=_limpiar_rate_limits, daemon=True, name="RateLimit-Cleaner").start()
         
         print(f"[SERVIDOR] Escuchando en {ip}:{puerto}")
+        print(f"[SERVIDOR] Rate limiting: {RATE_LIMIT_MAX_PETICIONES} peticiones/{RATE_LIMIT_VENTANA}s por IP")
+        print(f"[SERVIDOR] Max conexiones simultáneas: {MAX_CONEXIONES_ACTIVAS}")
         return True
         
     except Exception as e:
@@ -1031,15 +1319,31 @@ def iniciar_servidor(puerto: int = PUERTO_HTTP,
 
 
 def detener_servidor():
-    """Detiene el servidor."""
+    """Detiene el servidor de forma segura, guardando datos pendientes."""
     global _servidor_http_activo, _servidor_http, _procesador_activo
+    global _timer_guardar_solicitudes, _timer_guardar_equipos
+    
+    print("[SERVIDOR] Iniciando apagado seguro...")
     
     _procesador_activo = False
+    
+    # Cancelar timers de debouncing y guardar inmediatamente
+    with _lock_escrituras:
+        if _timer_guardar_solicitudes:
+            _timer_guardar_solicitudes.cancel()
+            _timer_guardar_solicitudes = None
+        if _timer_guardar_equipos:
+            _timer_guardar_equipos.cancel()
+            _timer_guardar_equipos = None
+    
+    # Guardar datos pendientes inmediatamente
+    _guardar_solicitudes_inmediato()
+    _guardar_equipos_aprobados_inmediato()
     
     if _servidor_http:
         _servidor_http.shutdown()
         _servidor_http_activo = False
-        print("[SERVIDOR] Detenido")
+        print("[SERVIDOR] Detenido correctamente")
 
 
 def servidor_esta_activo() -> bool:

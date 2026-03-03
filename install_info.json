@@ -1,0 +1,13 @@
+{
+  "version": "3.0.0",
+  "tipo": "receptora",
+  "fecha_instalacion": "2026-03-03 15:45",
+  "directorio": "C:\\Users\\PROTECNICA\\Desktop\\tickets\\tickets\\tickets",
+  "opciones": {
+    "escritorio": true,
+    "menu_inicio": true,
+    "inicio_windows": false,
+    "firewall": true,
+    "crear_db": true
+  }
+}
