@@ -4938,44 +4938,31 @@ class PanelAdminIT:
     # =========================================================================
     
     def _vista_escaner_red(self) -> Column:
-        """Construye la vista del escáner de red con carga asincrónica (no bloqueante)."""
+        """Construye la vista del escáner de red."""
         self.escaner = EscanerRed()
         
-        # Info que se obtiene rápidamente (sin bloquear)
+        # Obtener info rápida de red
         ip_local = obtener_ip_local()
         ip_base, _, _ = obtener_rango_red()
         servidor_activo = servidor_esta_activo()
         
-        # Inicializar variables para caché
-        self._escaner_cache = {}
-        self._escaner_cache_time = 0
-        
-        # Stats placeholders (valores iniciales)
-        self._escaner_stats_valores = {
-            "total_db": "...",
-            "online_servidor": "...", 
-            "total_servidor": "...",
-            "cambios": "..."
-        }
-        
-        # Labels para stats (se actualizarán asincronicamente)
-        self._escaner_label_total_db = ft.Text("...", size=16, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO)
-        self._escaner_label_online = ft.Text("...", size=16, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO)
-        self._escaner_label_total_srv = ft.Text("...", size=16, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO)
-        self._escaner_label_cambios = ft.Text("...", size=16, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO)
-        
-        # Contenedores para tablas (se cargarán asincronicamente)
-        self._escaner_tabla_conectados = ft.Container(
-            content=ft.Row([ft.ProgressRing(width=40, height=40, stroke_width=3, color=COLOR_ACENTO)],
-                          alignment=ft.MainAxisAlignment.CENTER),
-            height=100
-        )
-        self._escaner_alertas = ft.Container()
-        self._escaner_tabla_red = ft.Container(
-            content=ft.Row([ft.ProgressRing(width=40, height=40, stroke_width=3, color=COLOR_ACENTO)],
-                          alignment=ft.MainAxisAlignment.CENTER),
-            height=100
-        )
+        # Cargar datos (optimizado - solo lo necesario)
+        try:
+            equipos_red = self.escaner.obtener_equipos_red()
+            equipos_servidor = obtener_equipos_con_estado()
+            equipos_online = obtener_equipos_online()
+            
+            # Contadores
+            total_db = len(equipos_red) if not equipos_red.empty else 0
+            online_servidor = len(equipos_online)
+            total_servidor = len(equipos_servidor)
+            cambios = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
+        except Exception as e:
+            print(f"[ERROR] Error cargando datos del escáner: {e}")
+            equipos_red = pd.DataFrame()
+            equipos_servidor = []
+            equipos_online = []
+            total_db = online_servidor = total_servidor = cambios = 0
         
         # Controles de rango
         self.txt_rango_inicio = ft.TextField(
@@ -4991,7 +4978,7 @@ class PanelAdminIT:
             text_align=TextAlign.CENTER
         )
         
-        # Barra de progreso para escaneó
+        # Barra de progreso para escaneo
         self.progress_escaneo = ft.ProgressBar(
             width=400,
             value=0,
@@ -5001,10 +4988,12 @@ class PanelAdminIT:
         )
         self.lbl_progreso = Text("", size=12, color=COLOR_TEXTO_SEC, visible=False)
         
-        # Iniciar carga asincrónica de datos en background
-        threading.Thread(target=self._cargar_datos_escaner_async, daemon=True).start()
+        # Construir tablas
+        tabla_conectados = self._construir_tabla_equipos_conectados(equipos_servidor)
+        self.tabla_red = self._construir_tabla_red(equipos_red)
+        alertas_cambios = self._construir_alertas_cambios(equipos_red)
         
-        # Construir la columna con placeholders (se rellenarán asincronicamente)
+        # Construir la columna
         return Column(
             controls=[
                 # Título
@@ -5043,12 +5032,12 @@ class PanelAdminIT:
                 ),
                 Container(height=15),
                 
-                # KPIs  - con datos que se cargan asincronicamente
+                # KPIs
                 Row([
-                    self._kpi_card("Conectados", "...", icons.WIFI, COLOR_EXITO, "En línea ahora"),
-                    self._kpi_card("Registrados", "...", icons.DEVICES, COLOR_INFO, "En servidor"),
-                    self._kpi_card("En BD", "...", icons.STORAGE, COLOR_ACENTO, "Base datos"),
-                    self._kpi_card("Cambios IP", "...", icons.SWAP_HORIZ, COLOR_ADVERTENCIA, "Detectados"),
+                    self._kpi_card("Conectados", str(online_servidor), icons.WIFI, COLOR_EXITO, "En línea ahora"),
+                    self._kpi_card("Registrados", str(total_servidor), icons.DEVICES, COLOR_INFO, "En servidor"),
+                    self._kpi_card("En BD", str(total_db), icons.STORAGE, COLOR_ACENTO, "Base datos"),
+                    self._kpi_card("Cambios IP", str(cambios), icons.SWAP_HORIZ, COLOR_ADVERTENCIA, "Detectados"),
                 ], wrap=True),
                 Container(height=20),
                 
@@ -5067,7 +5056,10 @@ class PanelAdminIT:
                             )
                         ], spacing=10),
                         Container(height=10),
-                        self._escaner_tabla_conectados
+                        tabla_conectados if equipos_servidor else Text(
+                            "No hay equipos conectados al servidor", 
+                            color=COLOR_TEXTO_SEC, italic=True
+                        )
                     ]),
                     bgcolor=COLOR_SUPERFICIE,
                     padding=15,
@@ -5077,7 +5069,7 @@ class PanelAdminIT:
                 Container(height=20),
                 
                 # Alertas de cambios de IP
-                self._escaner_alertas,
+                alertas_cambios if cambios > 0 else Container(),
                 
                 # SECCIÓN: ESCANEO DE RED
                 Container(
@@ -5114,7 +5106,7 @@ class PanelAdminIT:
                 Text("📋 Historial de Equipos (Base de Datos)", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
                 Container(height=10),
                 Container(
-                    content=self._escaner_tabla_red,
+                    content=self.tabla_red,
                     expand=True,
                     border=ft.Border.all(1, COLOR_SUPERFICIE_2),
                     border_radius=10,
@@ -5124,58 +5116,6 @@ class PanelAdminIT:
             scroll=ScrollMode.AUTO,
             expand=True
         )
-    
-    def _cargar_datos_escaner_async(self):
-        """Carga datos del escáner en background (thread separado)."""
-        try:
-            # Cargar datos pesados sin bloquear UI
-            equipos_red = self.escaner.obtener_equipos_red()
-            equipos_servidor = obtener_equipos_con_estado()
-            equipos_online = obtener_equipos_online()
-            
-            # Calcular estadísticas
-            total_db = len(equipos_red) if not equipos_red.empty else 0
-            online_servidor = len(equipos_online)
-            total_servidor = len(equipos_servidor)
-            cambios = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
-            
-            # Construir tablas
-            tabla_conectados = self._construir_tabla_equipos_conectados(equipos_servidor)
-            tabla_red = self._construir_tabla_red(equipos_red)
-            alertas_cambios = self._construir_alertas_cambios(equipos_red)
-            
-            # Actualizar valores de estadísticas
-            def actualizar_ui():
-                try:
-                    # Actualizar labels
-                    self._escaner_label_total_db.value = str(total_db)
-                    self._escaner_label_online.value = str(online_servidor)
-                    self._escaner_label_total_srv.value = str(total_servidor)
-                    self._escaner_label_cambios.value = str(cambios)
-                    
-                    # Actualizar contenedores
-                    self._escaner_tabla_conectados.content = tabla_conectados if equipos_servidor else Text(
-                        "No hay equipos conectados al servidor", 
-                        color=COLOR_TEXTO_SEC, italic=True
-                    )
-                    
-                    self._escaner_alertas.content = alertas_cambios if cambios > 0 else Container()
-                    self._escaner_tabla_red.content = tabla_red
-                    
-                    self.page.update()
-                except Exception as e:
-                    print(f"[ERROR] Error actualizando UI del escáner: {e}")
-            
-            # Ejecutar actualización en thread principal
-            try:
-                self.page.run_task(actualizar_ui)
-            except:
-                try:
-                    self.page.run_sync(actualizar_ui)
-                except:
-                    actualizar_ui()
-        except Exception as e:
-            print(f"[ERROR] Error cargando datos del escáner: {e}")
     
     def _construir_tabla_equipos_conectados(self, equipos: List[Dict]) -> DataTable:
         """Construye la tabla de equipos conectados al servidor."""
