@@ -49,8 +49,7 @@ COLUMNAS_DB = [
     "TECNICO_ASIGNADO",    # String - Técnico responsable
     "NOTAS_RESOLUCION",    # Long Text - Notas de resolución
     "FECHA_CIERRE",        # Datetime - Fecha de cierre
-    "TIEMPO_ESTIMADO",     # Int - Minutos estimados de resolución
-    "SATISFACCION"         # Int - Calificación 1-5 del usuario
+    "TIEMPO_ESTIMADO"      # Int - Minutos estimados de resolución
 ]
 
 # Columnas para base de datos de técnicos
@@ -363,7 +362,7 @@ class GestorTickets:
                                 continue
                     
                     # Manejar columnas numéricas
-                    for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
+                    for col in ["TURNO", "TIEMPO_ESTIMADO"]:
                         if col in df.columns:
                             try:
                                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
@@ -427,7 +426,7 @@ class GestorTickets:
                     )
             
             # Manejar columnas numéricas - convertir valores vacíos/None a 0
-            for col in ["TURNO", "TIEMPO_ESTIMADO", "SATISFACCION"]:
+            for col in ["TURNO", "TIEMPO_ESTIMADO"]:
                 if col in df_copy.columns:
                     # Reemplazar None, NaN y strings vacíos con 0, luego convertir a int
                     df_copy[col] = df_copy[col].fillna(0)
@@ -1153,8 +1152,7 @@ class GestorTickets:
             "TECNICO_ASIGNADO": "",
             "NOTAS_RESOLUCION": "",
             "FECHA_CIERRE": None,
-            "TIEMPO_ESTIMADO": 0,
-            "SATISFACCION": None
+            "TIEMPO_ESTIMADO": 0
         }
         
         # Leer datos existentes y agregar nuevo ticket

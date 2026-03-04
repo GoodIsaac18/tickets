@@ -529,11 +529,8 @@ class PanelAdminIT:
                 
                 Container(height=25),
                 
-                # ===== SECCIÓN 9: SATISFACCIÓN Y TIEMPOS =====
+                # ===== SECCIÓN 9: TIEMPOS DE RESOLUCIÓN =====
                 Row([
-                    # Satisfacción del cliente
-                    self._panel_satisfaccion_cliente(),
-                    
                     # Tiempo de resolución
                     self._panel_tiempo_resolucion(todos_tickets),
                 ], spacing=20, expand=True),
@@ -1575,81 +1572,6 @@ class PanelAdminIT:
             )
         except:
             return self._panel_vacio("Tiempos")
-    
-    def _panel_satisfaccion_cliente(self) -> Container:
-        """Panel de satisfacción del cliente."""
-        try:
-            # Datos simulados
-            calificacion_promedio = 8.7
-            total_encuestas = 247
-            respondradas = 189
-            tasa_respuesta = (respondradas / total_encuestas * 100)
-            
-            # Distribución de calificaciones
-            distribuciones = {
-                "⭐⭐⭐⭐⭐ Excelente": 58,
-                "⭐⭐⭐⭐ Muy Bueno": 89,
-                "⭐⭐⭐ Bueno": 32,
-                "⭐⭐ Regular": 8,
-                "⭐ Malo": 2
-            }
-            
-            items = []
-            for stars, cantidad in distribuciones.items():
-                porc = (cantidad / respondradas * 100) if respondradas > 0 else 0
-                color = {
-                    "⭐⭐⭐⭐⭐ Excelente": COLOR_EXITO,
-                    "⭐⭐⭐⭐ Muy Bueno": COLOR_DISPONIBLE,
-                    "⭐⭐⭐ Bueno": COLOR_ACENTO,
-                    "⭐⭐ Regular": COLOR_ADVERTENCIA,
-                    "⭐ Malo": COLOR_ERROR
-                }[stars]
-                
-                ancho = cantidad / max(distribuciones.values()) * 200
-                items.append(
-                    Row([
-                        Text(stars, size=10, color=COLOR_TEXTO),
-                        Container(
-                            width=ancho,
-                            height=18,
-                            bgcolor=color,
-                            border_radius=4
-                        ),
-                        Text(f"{cantidad} ({porc:.0f}%)", size=9, color=COLOR_ACENTO, weight=FontWeight.BOLD)
-                    ], spacing=10)
-                )
-            
-            return Container(
-                content=Column([
-                    Row([
-                        Text("😊 Satisfacción del Cliente", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                        Icon(icons.STAR_RATE, size=16, color=COLOR_EXITO)
-                    ]),
-                    Container(height=10),
-                    Row([
-                        Column([
-                            Text("Calificación", size=9, color=COLOR_TEXTO_SEC),
-                            Text(f"{calificacion_promedio} / 10", size=16, weight=FontWeight.BOLD, color=COLOR_EXITO)
-                        ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2),
-                        Column([
-                            Text("Respondidas", size=9, color=COLOR_TEXTO_SEC),
-                            Text(f"{respondradas}/{total_encuestas}", size=16, weight=FontWeight.BOLD, color=COLOR_ACENTO)
-                        ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2),
-                        Column([
-                            Text("Tasa Respuesta", size=9, color=COLOR_TEXTO_SEC),
-                            Text(f"{tasa_respuesta:.0f}%", size=16, weight=FontWeight.BOLD, color=COLOR_INFO)
-                        ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2)
-                    ], alignment=MainAxisAlignment.SPACE_AROUND),
-                    Container(height=12),
-                    Column(items, spacing=8)
-                ], spacing=8),
-                bgcolor=COLOR_SUPERFICIE,
-                border_radius=15,
-                padding=14,
-                expand=True
-            )
-        except:
-            return self._panel_vacio("Satisfacción")
     
     def _panel_prediccion_carga(self) -> Container:
         """Panel con predicción de carga próximas horas."""
@@ -5838,7 +5760,7 @@ def _inicializar_base_datos_automatica():
         "ID_TICKET", "TURNO", "FECHA_APERTURA", "USUARIO_AD", "HOSTNAME",
         "MAC_ADDRESS", "CATEGORIA", "PRIORIDAD", "DESCRIPCION", "ESTADO",
         "TECNICO_ASIGNADO", "NOTAS_RESOLUCION", "FECHA_CIERRE",
-        "TIEMPO_ESTIMADO", "SATISFACCION"
+        "TIEMPO_ESTIMADO"
     ]
     
     COLUMNAS_TECNICOS = [
