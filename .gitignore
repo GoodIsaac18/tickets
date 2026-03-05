@@ -14,6 +14,9 @@ notificaciones_estado.json
 servidor_config.txt
 ruta_actualizaciones.txt
 actualizacion_config.txt
+install_info.json
+update_state.json
+version.txt
 
 # Reportes generados
 reporte_*.xlsx
@@ -25,6 +28,13 @@ python_embed/
 build/
 dist/
 *.spec
+*.exe
+
+# Backups locales
+backups/
+
+# Entorno virtual
+.venv/
 
 # Archivos temporales
 *.log
