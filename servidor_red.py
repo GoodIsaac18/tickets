@@ -349,6 +349,8 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             self._consultar_ticket(datos)
         elif self.path == "/ticket/activo_usuario":
             self._consultar_ticket_activo_usuario(datos)
+        elif self.path == "/ticket/activos_usuario":
+            self._consultar_tickets_activos_usuario(datos)
         # === ENDPOINTS DE ENLACE ===
         elif self.path == "/enlace/solicitar":
             self._solicitar_enlace(datos)
@@ -523,6 +525,44 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             else:
                 self._enviar_json(200, {"success": True, "ticket": None})
                 
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._enviar_json(500, {"error": str(e)})
+
+    def _consultar_tickets_activos_usuario(self, datos: dict):
+        """Retorna TODOS los tickets activos de un usuario (no cerrados ni cancelados)."""
+        try:
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"error": "Servicio no disponible"})
+                return
+            
+            usuario_ad = datos.get("usuario_ad", "")
+            if not usuario_ad:
+                self._enviar_json(400, {"error": "usuario_ad requerido"})
+                return
+            
+            tickets = gestor.obtener_tickets_activos_usuario(usuario_ad)
+            
+            # Serializar fechas
+            tickets_serializables = []
+            for ticket in tickets:
+                t_ser = {}
+                for k, v in ticket.items():
+                    if hasattr(v, 'strftime'):
+                        t_ser[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                    elif hasattr(v, 'isoformat'):
+                        t_ser[k] = v.isoformat()
+                    else:
+                        t_ser[k] = v
+                tickets_serializables.append(t_ser)
+            
+            self._enviar_json(200, {
+                "success": True,
+                "tickets": tickets_serializables,
+                "total": len(tickets_serializables)
+            })
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1607,6 +1647,20 @@ def enviar_recordatorio_ticket(ip: str, puerto: int, id_ticket: str,
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def obtener_tickets_activos_servidor(ip: str, puerto: int, usuario_ad: str) -> Dict:
+    """Obtiene TODOS los tickets activos de un usuario desde el servidor."""
+    try:
+        url = f"http://{ip}:{puerto}/ticket/activos_usuario"
+        data = json.dumps({"usuario_ad": usuario_ad}).encode('utf-8')
+        
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+        
+        with urllib.request.urlopen(req, timeout=3) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        return {"success": False, "error": str(e), "tickets": []}
 
 
 def obtener_ticket_activo_servidor(ip: str, puerto: int, usuario_ad: str) -> Dict:

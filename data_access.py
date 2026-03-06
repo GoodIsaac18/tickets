@@ -810,6 +810,27 @@ class GestorTickets:
         
         # Retornar el más reciente
         return tickets_usuario.iloc[-1].to_dict()
+
+    def obtener_tickets_activos_usuario(self, usuario_ad: str) -> list:
+        """
+        Obtiene TODOS los tickets activos de un usuario (no cerrados ni cancelados).
+        
+        Args:
+            usuario_ad: Usuario de Active Directory.
+            
+        Returns:
+            Lista de diccionarios con todos los tickets activos.
+        """
+        df = self._leer_datos()
+        tickets_usuario = df[
+            (df["USUARIO_AD"].str.lower() == usuario_ad.lower()) & 
+            (~df["ESTADO"].isin(["Cerrado", "Cancelado"]))
+        ]
+        
+        if tickets_usuario.empty:
+            return []
+        
+        return tickets_usuario.to_dict('records')
     
     def obtener_tickets_usuario(self, usuario_ad: str, limite: int = 20) -> list:
         """

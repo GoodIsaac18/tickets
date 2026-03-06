@@ -39,6 +39,7 @@ from servidor_red import (
     enviar_recordatorio_ticket,
     cancelar_ticket_servidor,
     obtener_ticket_activo_servidor,
+    obtener_tickets_activos_servidor,
     obtener_historial_usuario_servidor,
     obtener_estado_servidor,
     HEARTBEAT_INTERVAL
@@ -1252,27 +1253,34 @@ class AppEmisora:
         
         # Cargar datos en background
         def cargar_tickets():
-            ticket_activo = None
+            tickets_activos = []
             historial = []
             
-            # 1) Obtener ticket activo
-            # Si ya tenemos un ticket activo en memoria (ej. recién creado), usarlo
-            if self.ticket_activo:
-                ticket_activo = self.ticket_activo
-            elif self.servidor_conectado and self.servidor_ip and self.enlazado:
+            # 1) Obtener TODOS los tickets activos del usuario desde el servidor
+            if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
-                    resultado = obtener_ticket_activo_servidor(
+                    resultado = obtener_tickets_activos_servidor(
                         self.servidor_ip, self.servidor_puerto, self.usuario_ad
                     )
-                    if resultado.get("success") and resultado.get("ticket"):
-                        ticket_activo = resultado["ticket"]
-                        self.ticket_activo = ticket_activo
+                    if resultado.get("success"):
+                        tickets_activos = resultado.get("tickets", [])
                 except Exception as e:
-                    print(f"[CLIENTE] Error obteniendo ticket activo: {e}")
+                    print(f"[CLIENTE] Error obteniendo tickets activos del servidor: {e}")
             
-            if not ticket_activo:
-                self.ticket_activo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
-                ticket_activo = self.ticket_activo
+            # Fallback: si el servidor no respondió, usar dato en memoria o local
+            if not tickets_activos:
+                if self.ticket_activo:
+                    tickets_activos = [self.ticket_activo]
+                else:
+                    try:
+                        todos_activos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad)
+                        tickets_activos = todos_activos if todos_activos else []
+                    except:
+                        try:
+                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+                            tickets_activos = [t] if t else []
+                        except:
+                            pass
             
             # 2) Obtener historial
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
@@ -1292,23 +1300,40 @@ class AppEmisora:
                 except:
                     pass
             
-            # Separar historial (excluir el ticket activo si ya lo mostramos)
-            id_activo = ticket_activo.get("ID_TICKET", "") if ticket_activo else ""
-            historial_pasado = [t for t in historial if t.get("ID_TICKET", "") != id_activo]
+            # 3) Procesar según cantidad de tickets activos
+            ids_activos = [t.get("ID_TICKET", "") for t in tickets_activos]
+            historial_pasado = [t for t in historial if t.get("ID_TICKET", "") not in ids_activos]
             
-            # Construir UI en el hilo principal
+            # Construir UI
             self._tickets_content.controls.clear()
             
-            # Seguridad: ocultar formulario si hay ticket activo
-            if ticket_activo and hasattr(self, '_form_section') and self._form_section.controls:
-                self._form_section.controls.clear()
-            
-            # === PANEL TICKET ACTIVO ===
-            if ticket_activo:
+            if len(tickets_activos) > 1:
+                # === CASO: MÚLTIPLES TICKETS ACTIVOS → mostrar modal de selección ===
+                self.ticket_activo = tickets_activos[-1]  # guardar el más reciente temporalmente
+                
+                # Ocultar formulario
+                if hasattr(self, '_form_section') and self._form_section.controls:
+                    self._form_section.controls.clear()
+                
+                self._tickets_content.controls.append(
+                    self._build_panel_tickets_duplicados(tickets_activos)
+                )
+                
+            elif len(tickets_activos) == 1:
+                # === CASO: UN TICKET ACTIVO → flujo normal ===
+                ticket_activo = tickets_activos[0]
+                self.ticket_activo = ticket_activo
+                
+                # Ocultar formulario
+                if hasattr(self, '_form_section') and self._form_section.controls:
+                    self._form_section.controls.clear()
+                
                 panel_activo = self._build_panel_ticket_activo(ticket_activo)
                 self._tickets_content.controls.append(panel_activo)
+                
             else:
-                # Mensaje de sin ticket activo
+                # === CASO: SIN TICKETS ACTIVOS → mostrar mensaje ===
+                self.ticket_activo = None
                 self._tickets_content.controls.append(
                     Container(
                         content=Column([
@@ -1339,6 +1364,13 @@ class AppEmisora:
                         margin=ft.Padding.only(left=20, right=20, top=15),
                     )
                 )
+                # Mostrar formulario
+                if hasattr(self, '_form_section') and not self._form_section.controls:
+                    self._form_section.controls = [
+                        self._crear_info_equipo(),
+                        self._crear_formulario(),
+                        self._crear_boton_envio(),
+                    ]
             
             # === HISTORIAL ===
             if historial_pasado:
@@ -1517,6 +1549,189 @@ class AppEmisora:
             margin=ft.Padding.only(left=20, right=20, top=15),
         )
     
+    def _build_panel_tickets_duplicados(self, tickets: list) -> Container:
+        """Construye panel de alerta cuando hay múltiples tickets activos.
+        El usuario debe elegir cuál conservar y cancelar los demás."""
+        
+        # Construir tarjetas de cada ticket
+        tarjetas = []
+        for t in tickets:
+            estado = t.get("ESTADO", "Abierto")
+            turno = t.get("TURNO", "-")
+            id_ticket = t.get("ID_TICKET", "-")
+            categoria = t.get("CATEGORIA", "-")
+            descripcion = str(t.get("DESCRIPCION", ""))[:60]
+            if len(str(t.get("DESCRIPCION", ""))) > 60:
+                descripcion += "..."
+            
+            fecha_ticket = t.get("FECHA_APERTURA", "")
+            fecha_str = ""
+            if fecha_ticket:
+                try:
+                    if hasattr(fecha_ticket, 'strftime'):
+                        fecha_str = fecha_ticket.strftime("%d/%m %I:%M %p")
+                    else:
+                        fecha_str = str(fecha_ticket)[:16]
+                except:
+                    fecha_str = str(fecha_ticket)[:16]
+            
+            color_map = {
+                "Abierto": COLOR_ADVERTENCIA,
+                "En Cola": COLOR_INFO,
+                "En Proceso": COLOR_PRIMARIO,
+                "En Espera": COLOR_TEXTO_SEC,
+            }
+            color_e = color_map.get(estado, COLOR_INFO)
+            
+            # Closure para capturar valores correctamente
+            def _crear_acciones(ticket_conservar, ticket_id_conservar):
+                def on_conservar(e):
+                    self._resolver_tickets_duplicados(ticket_conservar, tickets)
+                return on_conservar
+            
+            tarjeta = Container(
+                content=Column([
+                    Row([
+                        Container(
+                            content=Text(f"T{turno}", size=14, weight=FontWeight.BOLD,
+                                        color=colors.WHITE),
+                            bgcolor=color_e,
+                            padding=ft.Padding.symmetric(horizontal=10, vertical=4),
+                            border_radius=ft.BorderRadius.all(8),
+                        ),
+                        Column([
+                            Text(f"#{id_ticket}", size=11, color=COLOR_TEXTO_SEC),
+                            Text(estado, size=10, color=color_e, weight=FontWeight.W_600),
+                        ], spacing=1, expand=True),
+                        Text(fecha_str, size=10, color=COLOR_TEXTO_SEC),
+                    ], spacing=10, vertical_alignment=CrossAxisAlignment.CENTER),
+                    Container(height=4),
+                    Row([
+                        Icon(ICONOS_CATEGORIA.get(categoria, icons.HELP_OUTLINE), 
+                             size=13, color=COLOR_TEXTO_SEC),
+                        Text(categoria, size=11, color=COLOR_TEXTO_SEC),
+                    ], spacing=4),
+                    Text(descripcion, size=11, color=COLOR_TEXTO_SEC, italic=True) if descripcion else Container(),
+                    Container(height=6),
+                    Button(
+                        content=Row([
+                            Icon(icons.CHECK_CIRCLE, color=colors.WHITE, size=14),
+                            Text("Conservar este", color=colors.WHITE, weight=FontWeight.W_500, size=11),
+                        ], spacing=4, alignment=MainAxisAlignment.CENTER),
+                        bgcolor=COLOR_PRIMARIO,
+                        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=8)),
+                        on_click=_crear_acciones(t, id_ticket),
+                        width=200,
+                        height=32,
+                    ),
+                ], spacing=2),
+                bgcolor=COLOR_TARJETA,
+                border=ft.Border.all(1, COLOR_BORDE),
+                border_radius=ft.BorderRadius.all(10),
+                padding=ft.Padding.all(12),
+            )
+            tarjetas.append(tarjeta)
+        
+        return Container(
+            content=Column([
+                # Header con alerta
+                Row([
+                    Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                    Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                ], spacing=10),
+                Container(height=10),
+                # Banner de advertencia
+                Container(
+                    content=Row([
+                        Icon(icons.WARNING_AMBER, size=28, color=COLOR_ERROR),
+                        Column([
+                            Text(f"Tienes {len(tickets)} tickets abiertos", size=14,
+                                 weight=FontWeight.W_600, color=COLOR_ERROR),
+                            Text("Solo puedes tener 1 ticket activo. Elige cuál conservar.",
+                                 size=12, color=COLOR_TEXTO_SEC),
+                            Text("Los demás serán cancelados automáticamente.",
+                                 size=11, color=COLOR_TEXTO_SEC, italic=True),
+                        ], spacing=2, expand=True),
+                    ], spacing=12),
+                    bgcolor=COLOR_ERROR_CLARO,
+                    padding=ft.Padding.all(14),
+                    border_radius=ft.BorderRadius.all(10),
+                    border=ft.Border.all(1, COLOR_ERROR),
+                ),
+                Container(height=12),
+                # Lista de tickets
+                *tarjetas,
+            ]),
+            bgcolor=COLOR_TARJETA,
+            border=ft.Border.all(2, COLOR_ERROR),
+            border_radius=ft.BorderRadius.all(12),
+            padding=ft.Padding.all(18),
+            margin=ft.Padding.only(left=20, right=20, top=15),
+        )
+    
+    def _resolver_tickets_duplicados(self, ticket_conservar: dict, todos_tickets: list):
+        """Cancela todos los tickets excepto el elegido por el usuario."""
+        import threading
+        
+        id_conservar = ticket_conservar.get("ID_TICKET", "")
+        
+        # Mostrar loading
+        if hasattr(self, '_tickets_content') and self._tickets_content:
+            self._tickets_content.controls.clear()
+            self._tickets_content.controls.append(
+                Container(
+                    content=Column([
+                        Row([
+                            Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                            Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        ], spacing=10),
+                        Container(height=15),
+                        Row([
+                            ft.ProgressRing(width=20, height=20, stroke_width=2, color=COLOR_PRIMARIO),
+                            Text("Cancelando tickets duplicados...", size=13, color=COLOR_TEXTO_SEC),
+                        ], spacing=10, alignment=MainAxisAlignment.CENTER),
+                        Container(height=15),
+                    ]),
+                    bgcolor=COLOR_TARJETA,
+                    border_radius=ft.BorderRadius.all(12),
+                    padding=ft.Padding.all(20),
+                    margin=ft.Padding.only(left=20, right=20, top=15),
+                )
+            )
+            try:
+                self.page.update()
+            except:
+                pass
+        
+        def _cancelar_duplicados():
+            cancelados = 0
+            for t in todos_tickets:
+                tid = t.get("ID_TICKET", "")
+                if tid and tid != id_conservar:
+                    try:
+                        if self.servidor_conectado and self.servidor_ip:
+                            cancelar_ticket_servidor(
+                                self.servidor_ip, self.servidor_puerto,
+                                tid, self.usuario_ad,
+                                "Cancelado automáticamente: ticket duplicado"
+                            )
+                            cancelados += 1
+                    except Exception as ex:
+                        print(f"[CLIENTE] Error cancelando ticket duplicado {tid}: {ex}")
+            
+            print(f"[CLIENTE] Cancelados {cancelados} tickets duplicados, conservado: {id_conservar}")
+            
+            # Actualizar estado y UI
+            self.ticket_activo = ticket_conservar
+            try:
+                self.page.controls.clear()
+                self._construir_ui()
+                self.page.update()
+            except Exception as ex:
+                print(f"[CLIENTE] Error reconstruyendo UI: {ex}")
+        
+        threading.Thread(target=_cancelar_duplicados, daemon=True).start()
+    
     def _build_panel_historial(self, tickets: list) -> Container:
         """Construye el panel de historial de tickets anteriores."""
         filas = []
@@ -1631,29 +1846,34 @@ class AppEmisora:
                 pass
 
         def _refrescar_async():
-            ticket_nuevo = None
+            tickets_activos = []
             historial = []
 
-            # 1) Consultar ticket activo en el servidor
+            # 1) Consultar TODOS los tickets activos desde el servidor
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
-                    resultado = obtener_ticket_activo_servidor(
+                    resultado = obtener_tickets_activos_servidor(
                         self.servidor_ip, self.servidor_puerto, self.usuario_ad
                     )
                     if resultado.get("success"):
-                        ticket_nuevo = resultado.get("ticket")  # puede ser None si no hay activo
-                    else:
-                        # Error del servidor - mantener el ticket actual
-                        ticket_nuevo = ticket_respaldo
+                        tickets_activos = resultado.get("tickets", [])
                 except Exception as ex:
-                    print(f"[CLIENTE] Error refrescando ticket (usando respaldo): {ex}")
-                    ticket_nuevo = ticket_respaldo
-            else:
-                # Sin conexión - fallback local
-                try:
-                    ticket_nuevo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
-                except:
-                    ticket_nuevo = ticket_respaldo
+                    print(f"[CLIENTE] Error refrescando tickets: {ex}")
+            
+            # Fallback
+            if not tickets_activos:
+                if ticket_respaldo:
+                    tickets_activos = [ticket_respaldo]
+                else:
+                    try:
+                        todos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad)
+                        tickets_activos = todos if todos else []
+                    except:
+                        try:
+                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+                            tickets_activos = [t] if t else []
+                        except:
+                            pass
 
             # 2) Obtener historial
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
@@ -1671,26 +1891,32 @@ class AppEmisora:
                 except:
                     pass
 
-            # 3) Actualizar estado
-            self.ticket_activo = ticket_nuevo
-            id_activo = ticket_nuevo.get("ID_TICKET", "") if ticket_nuevo else ""
-            historial_pasado = [t for t in historial if t.get("ID_TICKET", "") != id_activo]
+            # 3) Actualizar sección de tickets
+            ids_activos = [t.get("ID_TICKET", "") for t in tickets_activos]
+            historial_pasado = [t for t in historial if t.get("ID_TICKET", "") not in ids_activos]
 
-            # 4) Actualizar SOLO la sección de tickets (no reconstruir toda la UI)
             try:
                 if not hasattr(self, '_tickets_content') or not self._tickets_content:
                     return
 
                 self._tickets_content.controls.clear()
 
-                if ticket_nuevo:
-                    panel_activo = self._build_panel_ticket_activo(ticket_nuevo)
+                if len(tickets_activos) > 1:
+                    # Múltiples tickets → mostrar panel de selección
+                    self.ticket_activo = tickets_activos[-1]
+                    if hasattr(self, '_form_section') and self._form_section.controls:
+                        self._form_section.controls.clear()
+                    self._tickets_content.controls.append(
+                        self._build_panel_tickets_duplicados(tickets_activos)
+                    )
+                elif len(tickets_activos) == 1:
+                    self.ticket_activo = tickets_activos[0]
+                    panel_activo = self._build_panel_ticket_activo(tickets_activos[0])
                     self._tickets_content.controls.append(panel_activo)
-                    # Ocultar formulario si hay ticket activo
                     if hasattr(self, '_form_section') and self._form_section.controls:
                         self._form_section.controls.clear()
                 else:
-                    # Sin ticket activo - mostrar mensaje
+                    self.ticket_activo = None
                     self._tickets_content.controls.append(
                         Container(
                             content=Column([
@@ -1721,7 +1947,6 @@ class AppEmisora:
                             margin=ft.Padding.only(left=20, right=20, top=15),
                         )
                     )
-                    # Mostrar formulario si no hay ticket activo
                     if hasattr(self, '_form_section') and not self._form_section.controls:
                         self._form_section.controls = [
                             self._crear_info_equipo(),
