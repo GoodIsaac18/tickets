@@ -40,6 +40,7 @@ from servidor_red import (
     cancelar_ticket_servidor,
     obtener_ticket_activo_servidor,
     obtener_historial_usuario_servidor,
+    obtener_estado_servidor,
     HEARTBEAT_INTERVAL
 )
 
@@ -489,15 +490,34 @@ class AppEmisora:
         )
     
     def _crear_panel_estado(self) -> Container:
-        """Panel de estado del servicio de soporte."""
-        self.tecnicos_disponibles = self.gestor.obtener_tecnicos_disponibles()
-        self.hay_disponible = self.gestor.hay_tecnico_disponible()
+        """Panel de estado del servicio de soporte (consulta al servidor si está conectado)."""
+        # Intentar obtener estado real del servidor
+        if self.servidor_conectado and self.servidor_ip:
+            try:
+                estado_srv = obtener_estado_servidor(self.servidor_ip, self.servidor_puerto)
+                self.hay_disponible = estado_srv.get("hay_disponible", False)
+                nombres_tec = estado_srv.get("tecnicos_disponibles", [])
+                self.tecnicos_disponibles = nombres_tec
+            except Exception:
+                self.tecnicos_disponibles = []
+                self.hay_disponible = False
+        else:
+            # Fallback local (solo funciona en la receptora)
+            try:
+                tecs = self.gestor.obtener_tecnicos_disponibles()
+                self.tecnicos_disponibles = tecs if isinstance(tecs, list) else tecs.values.tolist() if hasattr(tecs, 'values') else []
+                self.hay_disponible = len(self.tecnicos_disponibles) > 0
+            except Exception:
+                self.tecnicos_disponibles = []
+                self.hay_disponible = False
+        
+        cant_tec = len(self.tecnicos_disponibles) if isinstance(self.tecnicos_disponibles, list) else 0
         
         if self.hay_disponible:
             icono = icons.CHECK_CIRCLE
             color = COLOR_EXITO
             titulo = "Servicio Disponible"
-            subtitulo = f"{len(self.tecnicos_disponibles)} técnico(s) listo(s) para atenderte"
+            subtitulo = f"{cant_tec} técnico(s) listo(s) para atenderte"
             color_fondo = "#ECFDF5"
         else:
             icono = icons.HOURGLASS_TOP
@@ -521,7 +541,7 @@ class AppEmisora:
                 Container(
                     content=Row([
                         Icon(icons.PEOPLE, size=14, color=colors.WHITE),
-                        Text(f"{len(self.tecnicos_disponibles)}", size=13, weight=FontWeight.BOLD, color=colors.WHITE),
+                        Text(f"{cant_tec}", size=13, weight=FontWeight.BOLD, color=colors.WHITE),
                     ], spacing=4),
                     bgcolor=color,
                     padding=ft.Padding.symmetric(horizontal=10, vertical=6),
@@ -1575,10 +1595,14 @@ class AppEmisora:
         )
     
     def _refrescar_ticket(self, e):
-        """Refresca el estado del ticket activo consultando al servidor."""
+        """Refresca el estado del ticket activo consultando al servidor.
+        Solo actualiza la sección de tickets (no reconstruye toda la UI)."""
         import threading
 
-        # Mostrar loading en la sección de tickets (sin perder ticket_activo)
+        # Guardar referencia al ticket actual por si el servidor falla
+        ticket_respaldo = self.ticket_activo
+
+        # Mostrar loading en la sección de tickets
         if hasattr(self, '_tickets_content') and self._tickets_content:
             self._tickets_content.controls.clear()
             self._tickets_content.controls.append(
@@ -1608,33 +1632,110 @@ class AppEmisora:
 
         def _refrescar_async():
             ticket_nuevo = None
+            historial = []
 
-            # 1) Consultar servidor
+            # 1) Consultar ticket activo en el servidor
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
                     resultado = obtener_ticket_activo_servidor(
                         self.servidor_ip, self.servidor_puerto, self.usuario_ad
                     )
-                    if resultado.get("success") and resultado.get("ticket"):
-                        ticket_nuevo = resultado["ticket"]
+                    if resultado.get("success"):
+                        ticket_nuevo = resultado.get("ticket")  # puede ser None si no hay activo
+                    else:
+                        # Error del servidor - mantener el ticket actual
+                        ticket_nuevo = ticket_respaldo
                 except Exception as ex:
-                    print(f"[CLIENTE] Error refrescando ticket: {ex}")
-
-            # 2) Fallback: base de datos local
-            if not ticket_nuevo:
+                    print(f"[CLIENTE] Error refrescando ticket (usando respaldo): {ex}")
+                    ticket_nuevo = ticket_respaldo
+            else:
+                # Sin conexión - fallback local
                 try:
                     ticket_nuevo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
                 except:
+                    ticket_nuevo = ticket_respaldo
+
+            # 2) Obtener historial
+            if self.servidor_conectado and self.servidor_ip and self.enlazado:
+                try:
+                    res_hist = obtener_historial_usuario_servidor(
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15
+                    )
+                    if res_hist.get("success"):
+                        historial = res_hist.get("tickets", [])
+                except:
+                    pass
+            if not historial:
+                try:
+                    historial = self.gestor.obtener_tickets_usuario(self.usuario_ad, 15) or []
+                except:
                     pass
 
-            # 3) Actualizar estado y reconstruir UI completa
+            # 3) Actualizar estado
             self.ticket_activo = ticket_nuevo
+            id_activo = ticket_nuevo.get("ID_TICKET", "") if ticket_nuevo else ""
+            historial_pasado = [t for t in historial if t.get("ID_TICKET", "") != id_activo]
+
+            # 4) Actualizar SOLO la sección de tickets (no reconstruir toda la UI)
             try:
-                self.page.controls.clear()
-                self._construir_ui()
+                if not hasattr(self, '_tickets_content') or not self._tickets_content:
+                    return
+
+                self._tickets_content.controls.clear()
+
+                if ticket_nuevo:
+                    panel_activo = self._build_panel_ticket_activo(ticket_nuevo)
+                    self._tickets_content.controls.append(panel_activo)
+                    # Ocultar formulario si hay ticket activo
+                    if hasattr(self, '_form_section') and self._form_section.controls:
+                        self._form_section.controls.clear()
+                else:
+                    # Sin ticket activo - mostrar mensaje
+                    self._tickets_content.controls.append(
+                        Container(
+                            content=Column([
+                                Row([
+                                    Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                                    Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                ], spacing=10),
+                                Container(height=12),
+                                Container(
+                                    content=Row([
+                                        Icon(icons.CHECK_CIRCLE_OUTLINE, size=28, color=COLOR_EXITO),
+                                        Column([
+                                            Text("No tienes tickets activos", size=14,
+                                                 weight=FontWeight.W_600, color=COLOR_TEXTO),
+                                            Text("Puedes crear uno nuevo con el formulario de abajo",
+                                                 size=12, color=COLOR_TEXTO_SEC),
+                                        ], spacing=2, expand=True),
+                                    ], spacing=12),
+                                    bgcolor="#F0FDF4",
+                                    padding=ft.Padding.all(14),
+                                    border_radius=ft.BorderRadius.all(10),
+                                    border=ft.Border.all(1, "#BBF7D0"),
+                                ),
+                            ]),
+                            bgcolor=COLOR_TARJETA,
+                            border_radius=ft.BorderRadius.all(12),
+                            padding=ft.Padding.all(20),
+                            margin=ft.Padding.only(left=20, right=20, top=15),
+                        )
+                    )
+                    # Mostrar formulario si no hay ticket activo
+                    if hasattr(self, '_form_section') and not self._form_section.controls:
+                        self._form_section.controls = [
+                            self._crear_info_equipo(),
+                            self._crear_formulario(),
+                            self._crear_boton_envio(),
+                        ]
+
+                if historial_pasado:
+                    panel_hist = self._build_panel_historial(historial_pasado)
+                    self._tickets_content.controls.append(panel_hist)
+
                 self.page.update()
             except Exception as ex:
-                print(f"[CLIENTE] Error reconstruyendo UI tras refrescar: {ex}")
+                print(f"[CLIENTE] Error actualizando sección de tickets: {ex}")
 
         threading.Thread(target=_refrescar_async, daemon=True).start()
     
@@ -2470,9 +2571,18 @@ class AppEmisora:
                 self.texto_carga.value = "Verificando disponibilidad..."
                 self.page.update()
             
-            # Actualizar estado
-            self.tecnicos_disponibles = self.gestor.obtener_tecnicos_disponibles()
-            self.hay_disponible = self.gestor.hay_tecnico_disponible()
+            # Actualizar estado de técnicos (del servidor si está conectado)
+            if self.servidor_conectado and self.servidor_ip:
+                try:
+                    estado_srv = obtener_estado_servidor(self.servidor_ip, self.servidor_puerto)
+                    self.hay_disponible = estado_srv.get("hay_disponible", False)
+                    self.tecnicos_disponibles = estado_srv.get("tecnicos_disponibles", [])
+                except Exception:
+                    self.hay_disponible = False
+                    self.tecnicos_disponibles = []
+            else:
+                self.tecnicos_disponibles = self.gestor.obtener_tecnicos_disponibles()
+                self.hay_disponible = self.gestor.hay_tecnico_disponible()
             
             await asyncio.sleep(0.3)
             

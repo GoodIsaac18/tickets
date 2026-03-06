@@ -1617,10 +1617,21 @@ def obtener_ticket_activo_servidor(ip: str, puerto: int, usuario_ad: str) -> Dic
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, timeout=3) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def obtener_estado_servidor(ip: str, puerto: int) -> Dict:
+    """Consulta el estado del sistema (técnicos disponibles, etc.) desde el servidor."""
+    try:
+        url = f"http://{ip}:{puerto}/estado"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=3) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        return {"hay_disponible": False, "tecnicos_disponibles": [], "error": str(e)}
 
 
 def obtener_historial_usuario_servidor(ip: str, puerto: int, usuario_ad: str, limite: int = 20) -> Dict:
@@ -1631,7 +1642,7 @@ def obtener_historial_usuario_servidor(ip: str, puerto: int, usuario_ad: str, li
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with urllib.request.urlopen(req, timeout=4) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
         return {"success": False, "error": str(e)}
