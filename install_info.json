@@ -1,7 +1,7 @@
 {
-  "version": "3.0.0",
-  "tipo": "receptora",
-  "fecha_instalacion": "2026-03-04 09:05",
+  "version": "dev-8ee982b",
+  "tipo": "emisora",
+  "fecha_instalacion": "2026-03-05 12:18",
   "directorio": "C:\\Users\\PROTECNICA\\Desktop\\tickets\\tickets\\tickets",
   "opciones": {
     "escritorio": true,
@@ -9,5 +9,6 @@
     "inicio_windows": false,
     "firewall": true,
     "crear_db": true
-  }
+  },
+  "ultima_actualizacion": "2026-03-05 14:36"
 }

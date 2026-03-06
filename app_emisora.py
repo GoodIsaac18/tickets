@@ -1236,7 +1236,10 @@ class AppEmisora:
             historial = []
             
             # 1) Obtener ticket activo
-            if self.servidor_conectado and self.servidor_ip and self.enlazado:
+            # Si ya tenemos un ticket activo en memoria (ej. recién creado), usarlo
+            if self.ticket_activo:
+                ticket_activo = self.ticket_activo
+            elif self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
                     resultado = obtener_ticket_activo_servidor(
                         self.servidor_ip, self.servidor_puerto, self.usuario_ad
@@ -1244,15 +1247,11 @@ class AppEmisora:
                     if resultado.get("success") and resultado.get("ticket"):
                         ticket_activo = resultado["ticket"]
                         self.ticket_activo = ticket_activo
-                    elif resultado.get("success"):
-                        self.ticket_activo = None
                 except Exception as e:
                     print(f"[CLIENTE] Error obteniendo ticket activo: {e}")
             
-            if not ticket_activo and not self.ticket_activo:
+            if not ticket_activo:
                 self.ticket_activo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
-                ticket_activo = self.ticket_activo
-            elif self.ticket_activo:
                 ticket_activo = self.ticket_activo
             
             # 2) Obtener historial
@@ -2482,6 +2481,9 @@ class AppEmisora:
             self.btn_enviar.disabled = False
             self._enviando = False
             self.page.update()
+            
+            # Guardar ticket activo en memoria
+            self.ticket_activo = ticket
             
             # Mostrar diálogo de turno
             self._mostrar_dialogo_turno(ticket)
