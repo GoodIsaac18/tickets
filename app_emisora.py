@@ -439,7 +439,7 @@ class AppEmisora:
         self._iniciar_auto_refresco_tickets()
     
     def _iniciar_auto_refresco_tickets(self):
-        """Inicia un loop que refresca el estado de los tickets cada 15 segundos."""
+        """Inicia un loop que refresca el estado de los tickets cada 5 segundos de forma silenciosa."""
         import threading
         import time
         
@@ -449,16 +449,15 @@ class AppEmisora:
         self._auto_refresco_activo = True
         
         def _auto_refresco_loop():
-            time.sleep(15)  # Esperar 15s antes del primer refresco
+            time.sleep(5)  # Esperar 5s antes del primer refresco
             while self._auto_refresco_activo and self.servidor_conectado:
                 try:
                     if not self.enlazado or not self.servidor_ip:
-                        time.sleep(10)
+                        time.sleep(5)
                         continue
                     
-                    # Solo refrescar si estamos en la vista de tickets
                     if not hasattr(self, '_tickets_content') or not self._tickets_content:
-                        time.sleep(15)
+                        time.sleep(5)
                         continue
                     
                     # Consultar tickets activos desde el servidor
@@ -467,58 +466,90 @@ class AppEmisora:
                     )
                     
                     if not resultado.get("success"):
-                        time.sleep(15)
+                        time.sleep(5)
                         continue
                     
                     tickets_nuevos = resultado.get("tickets", [])
                     
-                    # Detectar CUALQUIER cambio comparando con estado actual
-                    hay_cambio = False
+                    # Obtener historial
+                    historial = []
+                    try:
+                        res_hist = obtener_historial_usuario_servidor(
+                            self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15, self.mac_address
+                        )
+                        if res_hist.get("success"):
+                            historial = res_hist.get("tickets", [])
+                    except:
+                        pass
                     
-                    # Caso 1: Antes no había ticket, ahora sí
-                    if not self.ticket_activo and tickets_nuevos:
-                        hay_cambio = True
-                        print(f"[AUTO-REFRESCO] Nuevo ticket detectado")
+                    # Siempre actualizar la UI con datos frescos del servidor
+                    ids_activos = [t.get("ID_TICKET", "") for t in tickets_nuevos]
+                    historial_pasado = [t for t in historial if t.get("ID_TICKET", "") not in ids_activos]
                     
-                    # Caso 2: Antes había ticket, ahora NO (fue cerrado/cancelado/eliminado)
-                    elif self.ticket_activo and not tickets_nuevos:
-                        hay_cambio = True
-                        print(f"[AUTO-REFRESCO] Ticket cerrado/cancelado detectado")
+                    self._tickets_content.controls.clear()
                     
-                    # Caso 3: Hay ticket - comparar campos relevantes
-                    elif self.ticket_activo and tickets_nuevos:
-                        ticket_actual = self.ticket_activo
-                        ticket_nuevo = tickets_nuevos[0]
-                        
-                        # Comparar estado
-                        if str(ticket_actual.get("ESTADO", "")).strip() != str(ticket_nuevo.get("ESTADO", "")).strip():
-                            hay_cambio = True
-                            print(f"[AUTO-REFRESCO] Estado cambió: '{ticket_actual.get('ESTADO')}' -> '{ticket_nuevo.get('ESTADO')}'")
-                        
-                        # Comparar técnico asignado
-                        tec_ant = str(ticket_actual.get("TECNICO_ASIGNADO", "") or "").strip()
-                        tec_new = str(ticket_nuevo.get("TECNICO_ASIGNADO", "") or "").strip()
-                        if tec_ant != tec_new:
-                            hay_cambio = True
-                            print(f"[AUTO-REFRESCO] Técnico cambió: '{tec_ant}' -> '{tec_new}'")
-                        
-                        # Comparar turno
-                        if str(ticket_actual.get("TURNO", "")).strip() != str(ticket_nuevo.get("TURNO", "")).strip():
-                            hay_cambio = True
-                            print(f"[AUTO-REFRESCO] Turno cambió")
-                        
-                        # Comparar cantidad de tickets activos
-                        if len(tickets_nuevos) > 1:
-                            hay_cambio = True
-                            print(f"[AUTO-REFRESCO] Múltiples tickets detectados")
+                    if len(tickets_nuevos) > 1:
+                        self.ticket_activo = tickets_nuevos[-1]
+                        if hasattr(self, '_form_section') and self._form_section.controls:
+                            self._form_section.controls.clear()
+                        self._tickets_content.controls.append(
+                            self._build_panel_tickets_duplicados(tickets_nuevos)
+                        )
+                    elif len(tickets_nuevos) == 1:
+                        self.ticket_activo = tickets_nuevos[0]
+                        panel_activo = self._build_panel_ticket_activo(tickets_nuevos[0])
+                        self._tickets_content.controls.append(panel_activo)
+                        if hasattr(self, '_form_section') and self._form_section.controls:
+                            self._form_section.controls.clear()
+                    else:
+                        self.ticket_activo = None
+                        self._tickets_content.controls.append(
+                            Container(
+                                content=Column([
+                                    Row([
+                                        Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                                        Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                    ], spacing=10),
+                                    Container(height=12),
+                                    Container(
+                                        content=Row([
+                                            Icon(icons.CHECK_CIRCLE_OUTLINE, size=28, color=COLOR_EXITO),
+                                            Column([
+                                                Text("No tienes tickets activos", size=14,
+                                                     weight=FontWeight.W_600, color=COLOR_TEXTO),
+                                                Text("Puedes crear uno nuevo con el formulario de abajo",
+                                                     size=12, color=COLOR_TEXTO_SEC),
+                                            ], spacing=2, expand=True),
+                                        ], spacing=12),
+                                        bgcolor="#F0FDF4",
+                                        padding=ft.Padding.all(14),
+                                        border_radius=ft.BorderRadius.all(10),
+                                        border=ft.Border.all(1, "#BBF7D0"),
+                                    ),
+                                ]),
+                                bgcolor=COLOR_TARJETA,
+                                border_radius=ft.BorderRadius.all(12),
+                                padding=ft.Padding.all(20),
+                                margin=ft.Padding.only(left=20, right=20, top=15),
+                            )
+                        )
+                        if hasattr(self, '_form_section') and not self._form_section.controls:
+                            self._form_section.controls = [
+                                self._crear_info_equipo(),
+                                self._crear_formulario(),
+                                self._crear_boton_envio(),
+                            ]
                     
-                    if hay_cambio:
-                        self._refrescar_ticket(None)
+                    if historial_pasado:
+                        panel_hist = self._build_panel_historial(historial_pasado)
+                        self._tickets_content.controls.append(panel_hist)
+                    
+                    self.page.update()
                     
                 except Exception as ex:
                     print(f"[AUTO-REFRESCO] Error: {ex}")
                 
-                time.sleep(15)  # Cada 15 segundos
+                time.sleep(5)  # Cada 5 segundos
             
             self._auto_refresco_activo = False
         
@@ -1348,6 +1379,7 @@ class AppEmisora:
         def cargar_tickets():
             tickets_activos = []
             historial = []
+            servidor_respondio = False
             
             # 1) Obtener TODOS los tickets activos del usuario desde el servidor
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
@@ -1355,14 +1387,13 @@ class AppEmisora:
                     resultado = obtener_tickets_activos_servidor(
                         self.servidor_ip, self.servidor_puerto, self.usuario_ad, self.mac_address
                     )
-                    if resultado.get("success"):
+                    servidor_respondio = resultado.get("success", False)
+                    if servidor_respondio:
                         tickets_activos = resultado.get("tickets", [])
                 except Exception as e:
                     print(f"[CLIENTE] Error obteniendo tickets activos del servidor: {e}")
             
-            # Fallback: SOLO si el servidor NO respondió (error de conexión)
-            # Si el servidor respondió con éxito pero tickets vacíos, NO usar dato viejo
-            servidor_respondio = resultado.get("success", False) if self.servidor_conectado and self.servidor_ip and self.enlazado else False
+            # Fallback: SOLO si el servidor NO responde (error de conexión)
             if not tickets_activos and not servidor_respondio:
                 if self.ticket_activo:
                     tickets_activos = [self.ticket_activo]
@@ -1947,6 +1978,7 @@ class AppEmisora:
         def _refrescar_async():
             tickets_activos = []
             historial = []
+            servidor_respondio = False
 
             # 1) Consultar TODOS los tickets activos desde el servidor
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
@@ -1954,18 +1986,13 @@ class AppEmisora:
                     resultado = obtener_tickets_activos_servidor(
                         self.servidor_ip, self.servidor_puerto, self.usuario_ad, self.mac_address
                     )
-                    if resultado.get("success"):
+                    servidor_respondio = resultado.get("success", False)
+                    if servidor_respondio:
                         tickets_activos = resultado.get("tickets", [])
                 except Exception as ex:
                     print(f"[CLIENTE] Error refrescando tickets: {ex}")
             
-            # Fallback: SOLO si el servidor NO respondió (error de conexión)
-            # Si el servidor respondió con éxito pero tickets vacíos = el ticket fue cerrado/cancelado
-            servidor_respondio = False
-            try:
-                servidor_respondio = resultado.get("success", False)
-            except:
-                pass
+            # Fallback: SOLO si el servidor NO responde
             if not tickets_activos and not servidor_respondio:
                 if ticket_respaldo:
                     tickets_activos = [ticket_respaldo]
