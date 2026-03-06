@@ -1,205 +1,198 @@
 #!/usr/bin/env python3
 # =============================================================================
-# SCRIPT DE INICIALIZACIÓN DE BASE DE DATOS
+# SCRIPT DE INICIALIZACIÓN DE BASE DE DATOS (SQLite v5.0.0)
 # =============================================================================
-# Este script inicializa y valida la base de datos Excel del sistema.
-# Úsalo si tienes problemas al iniciar la aplicación.
+# Resetea y valida tickets.db. Úsalo si tienes problemas al iniciar la app.
+#
+# Uso:
+#   python init_database.py          # Verifica / crea si no existe
+#   python init_database.py --reset  # Borra y recrea (PIERDE DATOS)
 # =============================================================================
 
-import pandas as pd
-from pathlib import Path
+import sqlite3
 import sys
-import traceback
+from pathlib import Path
 from datetime import datetime
 
-# Rutas de bases de datos
-EXCEL_DB_PATH = Path(__file__).parent / "tickets_db.xlsx"
-TECNICOS_DB_PATH = Path(__file__).parent / "tecnicos_db.xlsx"
-EQUIPOS_DB_PATH = Path(__file__).parent / "equipos_db.xlsx"
+DB_PATH = Path(__file__).parent / "tickets.db"
 
-# Columnas
-COLUMNAS_DB = [
-    "ID_TICKET", "TURNO", "FECHA_APERTURA", "USUARIO_AD", "HOSTNAME",
-    "MAC_ADDRESS", "CATEGORIA", "PRIORIDAD", "DESCRIPCION", "ESTADO",
-    "TECNICO_ASIGNADO", "NOTAS_RESOLUCION", "FECHA_CIERRE",
-    "TIEMPO_ESTIMADO"
+TECNICOS_INICIALES = [
+    {"id": "TEC001", "nombre": "Carlos Rodriguez",  "especialidad": "Hardware/Red",
+     "telefono": "ext. 101", "email": "carlos.rodriguez@empresa.com"},
+    {"id": "TEC002", "nombre": "Maria Garcia",      "especialidad": "Software/Accesos",
+     "telefono": "ext. 102", "email": "maria.garcia@empresa.com"},
+    {"id": "TEC003", "nombre": "Luis Hernandez",    "especialidad": "Redes/Seguridad",
+     "telefono": "ext. 103", "email": "luis.hernandez@empresa.com"},
 ]
 
-COLUMNAS_TECNICOS = [
-    "ID_TECNICO", "NOMBRE", "ESTADO", "ESPECIALIDAD",
-    "TICKETS_ATENDIDOS", "TICKET_ACTUAL", "ULTIMA_ACTIVIDAD",
-    "TELEFONO", "EMAIL"
-]
 
-COLUMNAS_EQUIPOS = [
-    "MAC_ADDRESS", "NOMBRE_EQUIPO", "HOSTNAME", "USUARIO_ASIGNADO",
-    "GRUPO", "UBICACION", "MARCA", "MODELO", "NUMERO_SERIE",
-    "TIPO_EQUIPO", "SISTEMA_OPERATIVO", "PROCESADOR", "RAM_GB",
-    "DISCO_GB", "FECHA_COMPRA", "GARANTIA_HASTA", "ESTADO_EQUIPO",
-    "NOTAS", "FECHA_REGISTRO", "ULTIMA_CONEXION", "TOTAL_TICKETS"
-]
+def crear_base_datos(borrar_existente: bool = False):
+    """Crea o verifica tickets.db con todas las tablas necesarias."""
+    print(f"\n  DB SQLite: {DB_PATH}")
 
-def crear_db_tickets():
-    """Crea la base de datos de tickets."""
+    if borrar_existente and DB_PATH.exists():
+        DB_PATH.unlink(missing_ok=True)
+        for ext in (".db-wal", ".db-shm"):
+            path_wal = DB_PATH.parent / (DB_PATH.name + ext)
+            path_wal.unlink(missing_ok=True)
+        print("  Archivo existente eliminado.")
+
+    conn = sqlite3.connect(str(DB_PATH), isolation_level=None)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA synchronous=NORMAL")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tickets (
+            ID_TICKET       TEXT PRIMARY KEY,
+            TURNO           INTEGER DEFAULT 0,
+            FECHA_APERTURA  TEXT,
+            USUARIO_AD      TEXT,
+            HOSTNAME        TEXT,
+            MAC_ADDRESS     TEXT,
+            CATEGORIA       TEXT,
+            PRIORIDAD       TEXT DEFAULT 'Media',
+            DESCRIPCION     TEXT,
+            ESTADO          TEXT DEFAULT 'Abierto',
+            TECNICO_ASIGNADO TEXT DEFAULT '',
+            NOTAS_RESOLUCION TEXT DEFAULT '',
+            HISTORIAL       TEXT DEFAULT '',
+            FECHA_CIERRE    TEXT,
+            TIEMPO_ESTIMADO INTEGER DEFAULT 0
+        )""")
+    print("  Tabla tickets:   OK")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tecnicos (
+            ID_TECNICO       TEXT PRIMARY KEY,
+            NOMBRE           TEXT,
+            ESTADO           TEXT DEFAULT 'Disponible',
+            ESPECIALIDAD     TEXT,
+            TICKETS_ATENDIDOS INTEGER DEFAULT 0,
+            TICKET_ACTUAL    TEXT DEFAULT '',
+            ULTIMA_ACTIVIDAD TEXT,
+            TELEFONO         TEXT DEFAULT '',
+            EMAIL            TEXT DEFAULT ''
+        )""")
+    print("  Tabla tecnicos:  OK")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS equipos (
+            MAC_ADDRESS      TEXT PRIMARY KEY,
+            NOMBRE_EQUIPO    TEXT,
+            HOSTNAME         TEXT,
+            USUARIO_ASIGNADO TEXT,
+            GRUPO            TEXT DEFAULT 'Sin Asignar',
+            UBICACION        TEXT DEFAULT '',
+            MARCA            TEXT DEFAULT '',
+            MODELO           TEXT DEFAULT '',
+            NUMERO_SERIE     TEXT DEFAULT '',
+            TIPO_EQUIPO      TEXT DEFAULT 'Desktop',
+            SISTEMA_OPERATIVO TEXT DEFAULT '',
+            PROCESADOR       TEXT DEFAULT '',
+            RAM_GB           INTEGER DEFAULT 0,
+            DISCO_GB         INTEGER DEFAULT 0,
+            FECHA_COMPRA     TEXT,
+            GARANTIA_HASTA   TEXT,
+            ESTADO_EQUIPO    TEXT DEFAULT 'Activo',
+            NOTAS            TEXT DEFAULT '',
+            FECHA_REGISTRO   TEXT,
+            ULTIMA_CONEXION  TEXT,
+            TOTAL_TICKETS    INTEGER DEFAULT 0
+        )""")
+    print("  Tabla equipos:   OK")
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS counters (
+            fecha TEXT PRIMARY KEY,
+            seq   INTEGER DEFAULT 0
+        )""")
+    print("  Tabla counters:  OK")
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tickets_estado ON tickets(ESTADO)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tickets_usuario_mac "
+        "ON tickets(USUARIO_AD, MAC_ADDRESS)")
+
+    # Técnicos iniciales (solo si la tabla está vacía)
+    ahora = datetime.now().isoformat(sep=" ", timespec="seconds")
+    n_antes = conn.execute("SELECT COUNT(*) FROM tecnicos").fetchone()[0]
+    if n_antes == 0:
+        for t in TECNICOS_INICIALES:
+            conn.execute(
+                """INSERT OR IGNORE INTO tecnicos
+                   (ID_TECNICO, NOMBRE, ESTADO, ESPECIALIDAD,
+                    TICKETS_ATENDIDOS, TICKET_ACTUAL, ULTIMA_ACTIVIDAD,
+                    TELEFONO, EMAIL)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (t["id"], t["nombre"], "Disponible", t["especialidad"],
+                 0, "", ahora, t["telefono"], t["email"])
+            )
+        print(f"  Tecnicos iniciales insertados: {len(TECNICOS_INICIALES)}")
+    else:
+        print(f"  Tecnicos existentes: {n_antes} (no se sobreescribieron)")
+
+    conn.close()
+    print(f"\n  Base de datos lista: {DB_PATH}")
+    return True
+
+
+def validar():
+    """Valida que la DB exista y todas las tablas estén presentes."""
+    print("\n  Validando tickets.db...")
+    if not DB_PATH.exists():
+        print(f"  No existe: {DB_PATH}")
+        return False
     try:
-        print(f"\n📋 Creando base de datos de tickets...")
-        
-        # Eliminar si existe
-        if EXCEL_DB_PATH.exists():
-            print(f"  ⚠️  Eliminando archivo existente: {EXCEL_DB_PATH.name}")
-            EXCEL_DB_PATH.unlink()
-        
-        # Crear nueva
-        df_vacio = pd.DataFrame(columns=COLUMNAS_DB)
-        df_vacio.to_excel(EXCEL_DB_PATH, index=False, engine='openpyxl')
-        print(f"  ✅ Base de datos de tickets creada: {EXCEL_DB_PATH}")
+        conn = sqlite3.connect(str(DB_PATH), timeout=3)
+        tablas = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        conn.close()
+        esperadas = {"tickets", "tecnicos", "equipos", "counters"}
+        faltantes = esperadas - tablas
+        if faltantes:
+            print(f"  Tablas faltantes: {faltantes}")
+            return False
+        print(f"  Tablas encontradas: {sorted(tablas)}")
+        print("  Validacion: OK")
         return True
     except Exception as e:
-        print(f"  ❌ Error: {e}")
-        traceback.print_exc()
+        print(f"  Error de acceso: {e}")
         return False
 
-def crear_db_tecnicos():
-    """Crea la base de datos de técnicos."""
-    try:
-        print(f"\n👥 Creando base de datos de técnicos...")
-        
-        # Eliminar si existe
-        if TECNICOS_DB_PATH.exists():
-            print(f"  ⚠️  Eliminando archivo existente: {TECNICOS_DB_PATH.name}")
-            TECNICOS_DB_PATH.unlink()
-        
-        # Técnicos de ejemplo
-        tecnicos_datos = [
-            {
-                "ID_TECNICO": "TEC001",
-                "NOMBRE": "Carlos Mendoza",
-                "ESTADO": "Disponible",
-                "ESPECIALIDAD": "Soporte General",
-                "TICKETS_ATENDIDOS": 0,
-                "TICKET_ACTUAL": "",
-                "ULTIMA_ACTIVIDAD": datetime.now(),
-                "TELEFONO": "+34 600 123 456",
-                "EMAIL": "carlos@empresa.com"
-            },
-            {
-                "ID_TECNICO": "TEC002",
-                "NOMBRE": "Patricia García",
-                "ESTADO": "Disponible",
-                "ESPECIALIDAD": "Redes",
-                "TICKETS_ATENDIDOS": 0,
-                "TICKET_ACTUAL": "",
-                "ULTIMA_ACTIVIDAD": datetime.now(),
-                "TELEFONO": "+34 600 234 567",
-                "EMAIL": "patricia@empresa.com"
-            },
-            {
-                "ID_TECNICO": "TEC003",
-                "NOMBRE": "Juan López",
-                "ESTADO": "Disponible",
-                "ESPECIALIDAD": "Hardware",
-                "TICKETS_ATENDIDOS": 0,
-                "TICKET_ACTUAL": "",
-                "ULTIMA_ACTIVIDAD": datetime.now(),
-                "TELEFONO": "+34 600 345 678",
-                "EMAIL": "juan@empresa.com"
-            }
-        ]
-        
-        df_tecnicos = pd.DataFrame(tecnicos_datos)
-        df_tecnicos.to_excel(TECNICOS_DB_PATH, index=False, engine='openpyxl')
-        print(f"  ✅ Base de datos de técnicos creada: {TECNICOS_DB_PATH}")
-        print(f"     Con {len(tecnicos_datos)} técnicos de ejemplo")
-        return True
-    except Exception as e:
-        print(f"  ❌ Error: {e}")
-        traceback.print_exc()
-        return False
-
-def crear_db_equipos():
-    """Crea la base de datos de equipos."""
-    try:
-        print(f"\n🖥️  Creando base de datos de equipos...")
-        
-        # Eliminar si existe
-        if EQUIPOS_DB_PATH.exists():
-            print(f"  ⚠️  Eliminando archivo existente: {EQUIPOS_DB_PATH.name}")
-            EQUIPOS_DB_PATH.unlink()
-        
-        # Crear nueva vacía
-        df_equipos = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
-        df_equipos.to_excel(EQUIPOS_DB_PATH, index=False, engine='openpyxl')
-        print(f"  ✅ Base de datos de equipos creada: {EQUIPOS_DB_PATH}")
-        return True
-    except Exception as e:
-        print(f"  ❌ Error: {e}")
-        traceback.print_exc()
-        return False
-
-def validar_bases_datos():
-    """Valida que todas las bases de datos sean accesibles."""
-    print(f"\n✓ Validando bases de datos...")
-    todos_ok = True
-    
-    for nombre, ruta, columnas in [
-        ("Tickets", EXCEL_DB_PATH, COLUMNAS_DB),
-        ("Técnicos", TECNICOS_DB_PATH, COLUMNAS_TECNICOS),
-        ("Equipos", EQUIPOS_DB_PATH, COLUMNAS_EQUIPOS)
-    ]:
-        try:
-            if not ruta.exists():
-                print(f"  ❌ {nombre}: No existe")
-                todos_ok = False
-                continue
-            
-            df = pd.read_excel(ruta, engine='openpyxl', nrows=1)
-            
-            # Verificar columnas
-            for col in columnas[:3]:
-                if col not in df.columns:
-                    print(f"  ⚠️  {nombre}: Falta columna '{col}'")
-                    todos_ok = False
-                    break
-            else:
-                print(f"  ✅ {nombre}: OK ({ruta.name})")
-        except Exception as e:
-            print(f"  ❌ {nombre}: Error - {e}")
-            todos_ok = False
-    
-    return todos_ok
 
 def main():
-    """Función principal."""
-    print("=" * 60)
-    print("🔧 INICIALIZACIÓN DE BASE DE DATOS - Sistema de Tickets")
-    print("=" * 60)
-    print(f"\n📍 Ubicación: {Path(__file__).parent}")
-    
+    print("=" * 62)
+    print("  INICIALIZACION DE BASE DE DATOS — Sistema de Tickets v5.0.0")
+    print("=" * 62)
+    print(f"\n  Ubicacion: {Path(__file__).parent}")
+
+    reset = "--reset" in sys.argv
+
+    if reset:
+        print("\n  Modo RESET: se eliminara la DB existente (se pierden datos).")
+        resp = input("  Esta seguro? (s/N): ").strip().lower()
+        if resp != "s":
+            print("  Cancelado.")
+            return
+
     try:
-        # Crear bases de datos
-        ok1 = crear_db_tickets()
-        ok2 = crear_db_tecnicos()
-        ok3 = crear_db_equipos()
-        
-        if ok1 and ok2 and ok3:
-            # Validar
-            if validar_bases_datos():
-                print("\n" + "=" * 60)
-                print("✅ INICIALIZACIÓN COMPLETADA EXITOSAMENTE")
-                print("=" * 60)
-                print("\n✓ Ahora puedes ejecutar: python app_receptora.py")
-                return 0
-            else:
-                print("\n⚠️  Bases de datos creadas pero con algunas advertencias")
-                return 1
+        crear_base_datos(borrar_existente=reset)
+        if validar():
+            print("\n  INICIALIZACION COMPLETADA EXITOSAMENTE")
+            print("  Ahora puedes ejecutar: python app_receptora.py")
         else:
-            print("\n❌ Error al crear las bases de datos")
-            return 1
-    
+            print("\n  La base de datos tiene problemas.")
+            print("  Ejecuta con --reset para recrearla desde cero.")
+            sys.exit(1)
     except Exception as e:
-        print(f"\n❌ Error crítico: {e}")
+        print(f"\n  Error fatal: {e}")
+        import traceback
         traceback.print_exc()
-        return 1
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

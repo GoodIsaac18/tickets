@@ -1,150 +1,127 @@
-# 🔧 GUÍA DE SOLUCIÓN DE PROBLEMAS - DATABASE ERROR
+﻿#  GUÍA DE SOLUCIÓN DE PROBLEMAS  DATABASE ERROR (SQLite)
 
-## ❌ El error "DATABASE" significa que hay un problema al acceder a la base de datos Excel
+##  El error "DATABASE" significa que hay un problema al acceder a 	ickets.db
 
-### 🎯 Causas Comunes
-
-1. **Archivos Excel bloqueados o corruptos**
-2. **Permisos de lectura/escritura insuficientes**
-3. **Primera inicialización incompleta**
-4. **Conflicto con otra instancia de la aplicación**
+Desde **v5.0.0** la base de datos es SQLite (un único archivo 	ickets.db).
+Ya **no** se usan archivos Excel (	ickets_db.xlsx, 	ecnicos_db.xlsx, equipos_db.xlsx).
 
 ---
 
-## ✅ SOLUCIONES (en orden de probabilidad)
+##  Causas Comunes
+
+1. **	ickets.db bloqueado**  otra instancia de la app está usando el archivo
+2. **Permisos de escritura insuficientes** en la carpeta de instalación
+3. **Primera ejecución**  la DB aún no se creó (debe crearse automáticamente)
+4. **Archivo corrupto**  poco probable, SQLite tiene journaling WAL
+
+---
+
+##  SOLUCIONES (en orden de probabilidad)
 
 ### **Solución 1: Reinicia la Aplicación (60% de efectividad)**
 
-```bash
-Cierra completamente la aplicación
-Espera 2-3 segundos
-Ejecuta nuevamente
+```
+1. Cierra completamente la aplicación
+2. Espera 2-3 segundos
+3. Ejecuta nuevamente
 ```
 
-Si esto no funciona, continúa con la Solución 2...
+SQLite libera el archivo cuando la app cierra. Si aún falla, continúa.
 
 ---
 
-### **Solución 2: Inicializa Automáticamente la Base de Datos (80% de efectividad)**
+### **Solución 2: Verificar si 	ickets.db existe**
 
-```bash
-En Windows: Ejecuta inicializar_base_datos.bat
-O ejecuta en PowerShell:
-  cd c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets
-  python init_database.py
-```
+`powershell
+\ = "c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets"
+Get-ChildItem \ -Filter "tickets.db" | Select-Object Name, Length, LastWriteTime
+`
 
-**¿Qué hace?**
-- ✓ Detecta y elimina archivos corruptos
-- ✓ Recrea las 3 bases de datos (Tickets, Técnicos, Equipos)
-- ✓ Carga técnicos de ejemplo
-- ✓ Valida integridad de todas las tablas
-
-**Resultado esperado:**
-```
-✅ INICIALIZACIÓN COMPLETADA EXITOSAMENTE
-✓ Ahora puedes ejecutar: python app_receptora.py
-```
+- **Si el archivo existe**  puede estar corrupto o bloqueado  ir a Solución 3
+- **Si no existe**  se creará automáticamente la próxima vez que corra la app
 
 ---
 
-### **Solución 3: Limpieza Manual Completa (95% de efectividad)**
+### **Solución 3: Recrear la base de datos manualmente**
 
-Si el script automático no funciona, sigue estos pasos:
+Solo si el archivo está corrupto (cierra la app antes):
 
-1. **Cierra la aplicación completamente**
-
-2. **Elimina los archivos Excel corruptos:**
-   ```
-   tickets_db.xlsx
-   tecnicos_db.xlsx
-   equipos_db.xlsx
-   ```
-   *(Estos archivos se encuentran en la misma carpeta que app_receptora.py)*
-
-3. **Ejecuta el inicializador:**
-   ```bash
-   python init_database.py
-   ```
-
-4. **Inicia la aplicación:**
-   ```bash
-   python app_receptora.py
-   ```
+`powershell
+cd "c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets"
+# Borrar DB corrupta (los datos se perderán)
+Remove-Item tickets.db -ErrorAction SilentlyContinue
+Remove-Item tickets.db-wal -ErrorAction SilentlyContinue
+Remove-Item tickets.db-shm -ErrorAction SilentlyContinue
+# La próxima vez que arranques app_receptora.py, la DB se recreará sola
+`
 
 ---
 
-### **Solución 4: Verificar Permisos de Carpeta (Advanced)**
+### **Solución 4: Verificar permisos de carpeta**
 
-Si aún hay problemas, verifica que tienes permisos de lectura/escritura:
-
-```bash
+`powershell
 # En PowerShell como Administrador:
 icacls "c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets" /grant Everyone:F
-```
+`
 
 ---
 
-## 📋 CHECKLIST DE DIAGNÓSTICO
+##  CHECKLIST DE DIAGNÓSTICO
 
-Ejecuta esto en PowerShell para diagnosticar:
+`powershell
+\ = "c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets"
 
-```powershell
-$ruta = "c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets"
-
-# Verificar archivos
-Write-Host "📁 Archivos en la carpeta:"
-Get-ChildItem $ruta -Filter "*_db.xlsx" | Select-Object Name, Length
+# Verificar archivo SQLite
+Write-Host " Base de datos:"
+Get-ChildItem \ -Filter "tickets.db*" | Select-Object Name, Length
 
 # Verificar permisos
-Write-Host "`n🔒 Permisos:"
-Get-Acl $ruta | Format-List
+Write-Host "
+ Permisos:"
+Get-Acl \ | Format-List
 
 # Verificar Python
-Write-Host "`n🐍 Python disponible:"
-python --version
+Write-Host "
+ Python disponible:"
+& "\\python_embed\python.exe" --version
 
-# Verificar pandas
-Write-Host "`n📚 Pandas disponible:"
-python -c "import pandas; print('Pandas OK')"
-```
-
----
-
-## 🆘 Si Ninguna Solución Funciona
-
-1. **Captura de pantalla del error** - Toma una foto o screenshot del mensaje exacto
-2. **Revisa los logs** - Ejecuta en PowerShell:
-   ```bash
-   cd c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets
-   python app_receptora.py 2>&1 | Tee-Object error_log.txt
-   ```
-3. **Verifica que haya 3 GB disponibles** en el disco
+# Verificar sqlite3 (siempre disponible en Python 3.x)
+Write-Host "
+ SQLite disponible:"
+& "\\python_embed\python.exe" -c "import sqlite3; print('SQLite', sqlite3.sqlite_version, 'OK')"
+`
 
 ---
 
-## 📞 INFORMACIÓN DEL SISTEMA
+##  Si Ninguna Solución Funciona
 
-**Archivo:** `init_database.py`
-- Crea base de datos de Tickets: `tickets_db.xlsx`
-- Crea base de datos de Técnicos: `tecnicos_db.xlsx`
-- Crea base de datos de Equipos: `equipos_db.xlsx`
+1. **Screenshot del error**  toma foto del mensaje exacto
+2. **Revisa los logs** en PowerShell:
+   `powershell
+   cd "c:\Users\PROTECNICA\Desktop\tickets\tickets\tickets"
+   .\python_embed\python.exe app_receptora.py 2>&1 | Tee-Object error_log.txt
+   `
+3. Verifica que haya espacio en disco suficiente (mínimo 100 MB libres)
+
+---
+
+##  INFORMACIÓN TÉCNICA
+
+**Base de datos:** 	ickets.db (SQLite con WAL mode)
+
+| Tabla | Contenido |
+|-------|-----------|
+| 	ickets | Todos los tickets de soporte |
+| 	ecnicos | Datos de los técnicos IT |
+| equipos | Inventario de equipos |
+| ed | Estado de equipos en red |
+| counters | Contador atómico de turnos |
+
+**Archivos WAL** (normales, no son errores):
+- 	ickets.db-wal  Write-Ahead Log (se fusiona automáticamente al cerrar)
+- 	ickets.db-shm  Memoria compartida WAL
 
 **Requisitos:**
-- Python 3.11+
-- pandas
-- openpyxl
-- Permisos de escritura en la carpeta
-
----
-
-## ✨ DESPUÉS DE RESOLVER
-
-Verifica que la aplicación inicia correctamente:
-
-✓ Se abre la ventana principal
-✓ Aparece el Dashboard
-✓ Los KPIs muestran datos
-✓ Se pueden ver técnicos
-
-Si todo funciona, ¡felicidades! 🎉
+- Python 3.11+ (embebido en python_embed/)
+- sqlite3 ya incluido  cero instalación adicional
+- Permisos de escritura en la carpeta de la aplicación

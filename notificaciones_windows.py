@@ -37,8 +37,8 @@ RUTA_APP_RECEPTORA = Path(__file__).parent / "app_receptora.py"
 RUTA_PYTHON = Path(__file__).parent / "python_embed" / "python.exe"
 
 # Archivos de monitoreo
-ARCHIVO_SOLICITUDES = Path(__file__).parent / "solicitudes_enlace.json"
-ARCHIVO_TICKETS = Path(__file__).parent / "tickets_db.xlsx"
+ARCHIVO_SOLICITUDES  = Path(__file__).parent / "solicitudes_enlace.json"
+DB_PATH              = Path(__file__).parent / "tickets.db"          # SQLite (no Excel)
 ARCHIVO_NOTIF_ESTADO = Path(__file__).parent / "notificaciones_estado.json"
 
 # Cola de notificaciones
@@ -230,46 +230,53 @@ def _monitorear_solicitudes():
 
 
 def _monitorear_tickets():
-    """Monitorea nuevos tickets en la base de datos."""
+    """Monitorea nuevos tickets en la base de datos SQLite."""
     global _notificaciones_mostradas
-    
+
     try:
-        if not ARCHIVO_TICKETS.exists():
+        if not DB_PATH.exists():
             return
-        
-        import pandas as pd
-        df = pd.read_excel(ARCHIVO_TICKETS)
-        
-        # Solo tickets abiertos recientes
-        for _, ticket in df.iterrows():
-            estado = str(ticket.get("ESTADO", ""))
+
+        import sqlite3
+        from datetime import datetime, timedelta
+
+        conn = sqlite3.connect(str(DB_PATH), timeout=5)
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute(
+            "SELECT * FROM tickets WHERE ESTADO IN ('Abierto','En Cola') "
+            "ORDER BY FECHA_APERTURA DESC LIMIT 50"
+        )
+        tickets = cur.fetchall()
+        conn.close()
+
+        for row in tickets:
+            ticket = dict(row)
+            estado = ticket.get("ESTADO", "")
             if estado not in ["Abierto", "En Cola"]:
                 continue
-            
+
             id_ticket = str(ticket.get("ID_TICKET", ""))
-            fecha_creacion = str(ticket.get("FECHA_CREACION", ""))
+            fecha_apertura = str(ticket.get("FECHA_APERTURA", ""))
             clave = f"ticket_{id_ticket}"
-            
+
             if clave in _notificaciones_mostradas:
                 continue
-            
+
             # Verificar que sea reciente (menos de 5 minutos)
             try:
-                from datetime import datetime, timedelta
-                fecha_ticket = datetime.fromisoformat(fecha_creacion.replace(" ", "T"))
+                fecha_ticket = datetime.fromisoformat(fecha_apertura)
                 if datetime.now() - fecha_ticket > timedelta(minutes=5):
                     continue
-            except:
+            except Exception:
                 continue
-            
+
             # Notificar
-            ticket_dict = ticket.to_dict()
-            if notificar_nuevo_ticket(ticket_dict):
+            if notificar_nuevo_ticket(ticket):
                 _notificaciones_mostradas[clave] = datetime.now().isoformat()
                 _guardar_estado_notificaciones()
                 print(f"[NOTIF] Nuevo ticket notificado: {ticket.get('TURNO')}")
-                
-    except Exception as e:
+
+    except Exception:
         pass
 
 

@@ -28,10 +28,8 @@ DB_PATH              = Path(__file__).parent / "tickets.db"
 SERVIDOR_PUERTO      = 5555
 SERVIDOR_CONFIG_PATH = Path(__file__).parent / "servidor_config.txt"
 
-# Rutas Excel (solo para exportación / migración)
-EXCEL_DB_PATH    = Path(__file__).parent / "tickets_db.xlsx"
-TECNICOS_DB_PATH = Path(__file__).parent / "tecnicos_db.xlsx"
-EQUIPOS_DB_PATH  = Path(__file__).parent / "equipos_db.xlsx"
+# Rutas Excel (usadas SOLO en migrar_desde_excel() — puedes ignorar si vienes de cero)
+# EXCEL_DB_PATH, TECNICOS_DB_PATH, EQUIPOS_DB_PATH se definen dentro de migrar_desde_excel()
 
 # Columnas
 COLUMNAS_DB = [
@@ -244,17 +242,12 @@ class GestorTickets:
 
     def __init__(self,
                  db_path: Path = DB_PATH,
-                 # Parámetros legacy ignorados (compatibilidad)
+                 # Parámetros legacy ignorados (compatibilidad con código viejo)
                  mongo_uri: str = "",
                  db_name: str = "",
-                 ruta_excel: Path = EXCEL_DB_PATH,
-                 ruta_tecnicos: Path = TECNICOS_DB_PATH,
-                 ruta_equipos: Path = EQUIPOS_DB_PATH):
-
-        self.db_path    = Path(db_path)
-        self.ruta_excel = ruta_excel
-        self.ruta_tecnicos = ruta_tecnicos
-        self.ruta_equipos  = ruta_equipos
+                 **kwargs):
+        """Inicializa el gestor. Solo se usa db_path; el resto es compatibilidad."""
+        self.db_path = Path(db_path)
 
         # Conexión principal (usada en hilos de la receptora)
         self._conn = _conectar(self.db_path)
@@ -953,8 +946,11 @@ class GestorTickets:
     # ------------------------------------------------------------------
 
     def migrar_desde_excel(self) -> Dict[str, int]:
-        """Importa datos de archivos Excel existentes a SQLite (uso único)."""
+        """Importa datos de archivos Excel existentes a SQLite (uso único, si tienes datos viejos)."""
         resultado = {"tickets": 0, "tecnicos": 0, "equipos": 0}
+
+        # Rutas Excel definidas localmente — solo usadas aquí
+        EXCEL_DB_PATH    = Path(__file__).parent / "tickets_db.xlsx"
 
         if EXCEL_DB_PATH.exists():
             try:

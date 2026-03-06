@@ -826,30 +826,62 @@ WshShell.Run """{PYTHON_EXE}"" ""{INSTALL_DIR / py_script}""", 0, False
             pass
 
     def _inicializar_bases_datos(self):
-        """Inicializa las bases de datos Excel."""
+        """Inicializa la base de datos SQLite y archivos JSON de soporte."""
         try:
-            import pandas as pd
+            import sqlite3
 
-            ruta_tickets = INSTALL_DIR / "tickets_db.xlsx"
-            if not ruta_tickets.exists():
-                pd.DataFrame(columns=COLUMNAS_DB).to_excel(ruta_tickets, index=False, engine='openpyxl')
-
-            ruta_tecnicos = INSTALL_DIR / "tecnicos_db.xlsx"
-            if not ruta_tecnicos.exists():
-                tecnicos = []
+            db_path = INSTALL_DIR / "tickets.db"
+            if not db_path.exists():
+                conn = sqlite3.connect(str(db_path), isolation_level=None)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tickets (
+                        ID_TICKET TEXT PRIMARY KEY, TURNO INTEGER DEFAULT 0,
+                        FECHA_APERTURA TEXT, USUARIO_AD TEXT, HOSTNAME TEXT,
+                        MAC_ADDRESS TEXT, CATEGORIA TEXT,
+                        PRIORIDAD TEXT DEFAULT 'Media', DESCRIPCION TEXT,
+                        ESTADO TEXT DEFAULT 'Abierto',
+                        TECNICO_ASIGNADO TEXT DEFAULT '',
+                        NOTAS_RESOLUCION TEXT DEFAULT '',
+                        HISTORIAL TEXT DEFAULT '', FECHA_CIERRE TEXT,
+                        TIEMPO_ESTIMADO INTEGER DEFAULT 0)""")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tecnicos (
+                        ID_TECNICO TEXT PRIMARY KEY, NOMBRE TEXT,
+                        ESTADO TEXT DEFAULT 'Disponible', ESPECIALIDAD TEXT,
+                        TICKETS_ATENDIDOS INTEGER DEFAULT 0,
+                        TICKET_ACTUAL TEXT DEFAULT '', ULTIMA_ACTIVIDAD TEXT,
+                        TELEFONO TEXT DEFAULT '', EMAIL TEXT DEFAULT '')""")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS equipos (
+                        MAC_ADDRESS TEXT PRIMARY KEY, NOMBRE_EQUIPO TEXT,
+                        HOSTNAME TEXT, USUARIO_ASIGNADO TEXT,
+                        GRUPO TEXT DEFAULT 'Sin Asignar',
+                        UBICACION TEXT DEFAULT '', MARCA TEXT DEFAULT '',
+                        MODELO TEXT DEFAULT '', NUMERO_SERIE TEXT DEFAULT '',
+                        TIPO_EQUIPO TEXT DEFAULT 'Desktop',
+                        SISTEMA_OPERATIVO TEXT DEFAULT '',
+                        PROCESADOR TEXT DEFAULT '',
+                        RAM_GB INTEGER DEFAULT 0, DISCO_GB INTEGER DEFAULT 0,
+                        FECHA_COMPRA TEXT, GARANTIA_HASTA TEXT,
+                        ESTADO_EQUIPO TEXT DEFAULT 'Activo',
+                        NOTAS TEXT DEFAULT '', FECHA_REGISTRO TEXT,
+                        ULTIMA_CONEXION TEXT, TOTAL_TICKETS INTEGER DEFAULT 0)""")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS counters (
+                        fecha TEXT PRIMARY KEY, seq INTEGER DEFAULT 0)""")
+                ahora = datetime.now().isoformat(sep=" ", timespec="seconds")
                 for tec in TECNICOS_INICIALES:
-                    tecnicos.append({
-                        "ID_TECNICO": tec["id"], "NOMBRE": tec["nombre"],
-                        "ESTADO": "Disponible", "ESPECIALIDAD": tec["especialidad"],
-                        "TICKETS_ATENDIDOS": 0, "TICKET_ACTUAL": "",
-                        "ULTIMA_ACTIVIDAD": datetime.now(),
-                        "TELEFONO": tec["telefono"], "EMAIL": tec["email"],
-                    })
-                pd.DataFrame(tecnicos).to_excel(ruta_tecnicos, index=False, engine='openpyxl')
-
-            ruta_equipos = INSTALL_DIR / "equipos_db.xlsx"
-            if not ruta_equipos.exists():
-                pd.DataFrame(columns=COLUMNAS_EQUIPOS).to_excel(ruta_equipos, index=False, engine='openpyxl')
+                    conn.execute(
+                        """INSERT OR IGNORE INTO tecnicos
+                           (ID_TECNICO,NOMBRE,ESTADO,ESPECIALIDAD,
+                            TICKETS_ATENDIDOS,TICKET_ACTUAL,ULTIMA_ACTIVIDAD,
+                            TELEFONO,EMAIL) VALUES(?,?,?,?,?,?,?,?,?)""",
+                        (tec["id"], tec["nombre"], "Disponible",
+                         tec["especialidad"], 0, "", ahora,
+                         tec["telefono"], tec["email"])
+                    )
+                conn.close()
 
             for archivo, contenido in [
                 ("equipos_aprobados.json", {"aprobados": [], "rechazados": []}),

@@ -26,11 +26,11 @@ from datetime import datetime
 # =============================================================================
 
 APP_NAME = "Sistema de Tickets IT"
-APP_VERSION = "3.4.0"
+APP_VERSION = "5.0.0"
 APP_NAME_EMISORA = "Tickets IT - Emisora"
 APP_NAME_RECEPTORA = "Tickets IT - Receptora (Panel IT)"
 PYTHON_VERSION = "3.11.9"
-DEPENDENCIAS = ["flet", "pandas", "openpyxl", "getmac", "winotify"]
+DEPENDENCIAS = ["flet", "pandas", "getmac", "winotify", "websockets"]
 
 # Detectar si se ejecuta como .exe (PyInstaller) o como .py
 if getattr(sys, 'frozen', False):
@@ -2091,7 +2091,7 @@ class InstaladorGrafico:
             # 6) Base de datos
             if self.opt_crear_db and self.tipo_instalacion == "receptora":
                 self._actualizar_progreso(0.82, "Inicializando bases de datos...")
-                self._agregar_log("Creando archivos de datos Excel/JSON...", "info")
+                self._agregar_log("Inicializando base de datos SQLite...", "info")
                 time.sleep(0.2)
                 self._inicializar_bases_datos()
                 self._agregar_log("✓ Bases de datos inicializadas", "success")
@@ -2157,7 +2157,7 @@ class InstaladorGrafico:
                 self._agregar_log("Eliminando archivos de datos...", "info")
                 time.sleep(0.2)
                 archivos_datos = [
-                    "tickets_db.xlsx", "tecnicos_db.xlsx", "equipos_db.xlsx",
+                    "tickets.db",
                     "equipos_aprobados.json", "solicitudes_enlace.json",
                     "notificaciones_estado.json", "servidor_config.txt",
                 ]
@@ -2322,32 +2322,76 @@ WshShell.Run """{python_exe}"" ""{base / py_script}""", 0, False
             pass
 
     def _inicializar_bases_datos(self):
-        """Inicializa bases de datos Excel y archivos JSON."""
+        """Inicializa la base de datos SQLite y archivos JSON de soporte."""
         base = Path(self.directorio_destino)
         try:
-            import pandas as pd
+            import sqlite3
 
-            ruta_tickets = base / "tickets_db.xlsx"
-            if not ruta_tickets.exists():
-                pd.DataFrame(columns=COLUMNAS_DB).to_excel(ruta_tickets, index=False, engine='openpyxl')
+            db_path = base / "tickets.db"
+            if not db_path.exists():
+                conn = sqlite3.connect(str(db_path), isolation_level=None)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA foreign_keys=ON")
 
-            ruta_tecnicos = base / "tecnicos_db.xlsx"
-            if not ruta_tecnicos.exists():
-                tecnicos = []
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tickets (
+                        ID_TICKET TEXT PRIMARY KEY, TURNO INTEGER DEFAULT 0,
+                        FECHA_APERTURA TEXT, USUARIO_AD TEXT, HOSTNAME TEXT,
+                        MAC_ADDRESS TEXT, CATEGORIA TEXT,
+                        PRIORIDAD TEXT DEFAULT 'Media',
+                        DESCRIPCION TEXT, ESTADO TEXT DEFAULT 'Abierto',
+                        TECNICO_ASIGNADO TEXT DEFAULT '',
+                        NOTAS_RESOLUCION TEXT DEFAULT '',
+                        HISTORIAL TEXT DEFAULT '',
+                        FECHA_CIERRE TEXT, TIEMPO_ESTIMADO INTEGER DEFAULT 0
+                    )""")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tecnicos (
+                        ID_TECNICO TEXT PRIMARY KEY, NOMBRE TEXT,
+                        ESTADO TEXT DEFAULT 'Disponible', ESPECIALIDAD TEXT,
+                        TICKETS_ATENDIDOS INTEGER DEFAULT 0,
+                        TICKET_ACTUAL TEXT DEFAULT '', ULTIMA_ACTIVIDAD TEXT,
+                        TELEFONO TEXT DEFAULT '', EMAIL TEXT DEFAULT ''
+                    )""")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS equipos (
+                        MAC_ADDRESS TEXT PRIMARY KEY, NOMBRE_EQUIPO TEXT,
+                        HOSTNAME TEXT, USUARIO_ASIGNADO TEXT,
+                        GRUPO TEXT DEFAULT 'Sin Asignar',
+                        UBICACION TEXT DEFAULT '', MARCA TEXT DEFAULT '',
+                        MODELO TEXT DEFAULT '', NUMERO_SERIE TEXT DEFAULT '',
+                        TIPO_EQUIPO TEXT DEFAULT 'Desktop',
+                        SISTEMA_OPERATIVO TEXT DEFAULT '',
+                        PROCESADOR TEXT DEFAULT '',
+                        RAM_GB INTEGER DEFAULT 0, DISCO_GB INTEGER DEFAULT 0,
+                        FECHA_COMPRA TEXT, GARANTIA_HASTA TEXT,
+                        ESTADO_EQUIPO TEXT DEFAULT 'Activo',
+                        NOTAS TEXT DEFAULT '', FECHA_REGISTRO TEXT,
+                        ULTIMA_CONEXION TEXT, TOTAL_TICKETS INTEGER DEFAULT 0
+                    )""")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS counters (
+                        fecha TEXT PRIMARY KEY, seq INTEGER DEFAULT 0
+                    )""")
+
+                # Técnicos iniciales
+                ahora = datetime.now().isoformat(sep=" ", timespec="seconds")
                 for t in TECNICOS_INICIALES:
-                    tecnicos.append({
-                        "ID_TECNICO": t["id"], "NOMBRE": t["nombre"],
-                        "ESTADO": "Disponible", "ESPECIALIDAD": t["especialidad"],
-                        "TICKETS_ATENDIDOS": 0, "TICKET_ACTUAL": "",
-                        "ULTIMA_ACTIVIDAD": datetime.now(),
-                        "TELEFONO": t["telefono"], "EMAIL": t["email"],
-                    })
-                pd.DataFrame(tecnicos).to_excel(ruta_tecnicos, index=False, engine='openpyxl')
+                    conn.execute(
+                        """INSERT OR IGNORE INTO tecnicos
+                           (ID_TECNICO,NOMBRE,ESTADO,ESPECIALIDAD,
+                            TICKETS_ATENDIDOS,TICKET_ACTUAL,ULTIMA_ACTIVIDAD,
+                            TELEFONO,EMAIL)
+                           VALUES(?,?,?,?,?,?,?,?,?)""",
+                        (t["id"], t["nombre"], "Disponible", t["especialidad"],
+                         0, "", ahora, t["telefono"], t["email"])
+                    )
+                conn.close()
+                self._agregar_log("✓ Base de datos SQLite creada (tickets.db)", "success")
+            else:
+                self._agregar_log("✓ Base de datos SQLite existente validada", "success")
 
-            ruta_equipos = base / "equipos_db.xlsx"
-            if not ruta_equipos.exists():
-                pd.DataFrame(columns=COLUMNAS_EQUIPOS).to_excel(ruta_equipos, index=False, engine='openpyxl')
-
+            # Archivos JSON de soporte
             for archivo, contenido in [
                 ("equipos_aprobados.json", {"aprobados": [], "rechazados": []}),
                 ("solicitudes_enlace.json", []),
@@ -2357,8 +2401,8 @@ WshShell.Run """{python_exe}"" ""{base / py_script}""", 0, False
                 if not ruta.exists():
                     with open(ruta, 'w', encoding='utf-8') as f:
                         json.dump(contenido, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        except Exception as e:
+            self._agregar_log(f"⚠ Error inicializando DB: {e}", "error")
 
     def _guardar_info_instalacion(self):
         """Guarda install_info.json con los datos de la instalación."""

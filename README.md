@@ -1,4 +1,4 @@
-# 🎫 Sistema de Gestión de Tickets IT — v3.3.0
+# 🎫 Sistema de Gestión de Tickets IT — v5.0.0
 
 Sistema completo de dos aplicaciones de escritorio desarrolladas en Python con **Flet 0.81** para la gestión del ciclo de vida de tickets de soporte técnico. Las aplicaciones se comunican por red local (LAN) sin necesidad de internet, e incluyen un **instalador profesional** con actualización automática desde GitHub.
 
@@ -10,13 +10,12 @@ Sistema completo de dos aplicaciones de escritorio desarrolladas en Python con *
 tickets/
 ├── app_emisora.py              # Aplicación para trabajadores (crear tickets)
 ├── app_receptora.py            # Panel IT (gestión, técnicos, reportes)
-├── data_access.py              # Módulo de acceso a datos (Excel como DB)
-├── servidor_red.py             # Servidor HTTP para comunicación LAN
-├── actualizador_github.py      # Módulo de actualizaciones desde GitHub
+├── data_access.py              # Módulo de acceso a datos (SQLite)
+├── servidor_red.py             # Servidor HTTP para comunicación LAN (puerto 5555)
+├── ws_server.py                # Servidor WebSocket en tiempo real (puerto 5556)
 ├── notificaciones_windows.py   # Sistema de notificaciones Windows
-├── servicio_notificaciones.py  # Servicio de notificaciones
+├── servicio_notificaciones.py  # Servicio de notificaciones en segundo plano
 ├── instalador.py               # Instalador gráfico profesional (Flet UI)
-├── version.json                # Metadata de versión para el repositorio
 ├── requirements.txt            # Dependencias del proyecto
 ├── ejecutar_emisora.bat        # Lanzador App Trabajadores
 ├── ejecutar_receptora.bat      # Lanzador Panel IT
@@ -25,17 +24,12 @@ tickets/
 ├── servidor_config.txt         # Configuración del servidor (IP:Puerto)
 ├── equipos_aprobados.json      # Equipos aprobados por el técnico
 ├── solicitudes_enlace.json     # Solicitudes de enlace pendientes
-├── tickets_db.xlsx             # Base de datos de tickets (se crea automáticamente)
-├── tecnicos_db.xlsx            # Base de datos de técnicos
-├── equipos_db.xlsx             # Base de datos de equipos
+├── tickets.db                  # Base de datos SQLite (se crea automáticamente)
 ├── icons/                      # Iconos de las aplicaciones
 │   ├── emisora.ico / .png
 │   └── receptora.ico / .png
-├── python_embed/               # Python 3.11.9 embebido (se descarga automáticamente)
-├── backups/                    # Backups automáticos de actualizaciones
-├── actualizar.py               # Script de parche v3.0
-├── actualizar_v3.2.py          # Script de parche v3.2
-└── actualizar_v3.3.py          # Script de parche v3.3
+├── python_embed/               # Python 3.11.9 embebido
+└── backups/                    # Backups automáticos de actualizaciones
 ```
 
 ---
@@ -169,9 +163,13 @@ El sistema funciona en red local (LAN) sin necesidad de internet:
 
 ---
 
-## 📊 Base de Datos (Excel)
+## 📊 Base de Datos (SQLite)
 
-### Hoja: TICKETS (`tickets_db.xlsx`)
+**Archivo:** `tickets.db` (creado automáticamente al primer arranque)
+
+Usa SQLite con WAL mode — incluido en Python estándar, cero instalación adicional.
+
+### Tabla: `tickets`
 
 | Campo | Descripción |
 |-------|-------------|
@@ -182,14 +180,15 @@ El sistema funciona en red local (LAN) sin necesidad de internet:
 | HOSTNAME | Nombre del equipo |
 | MAC_ADDRESS | Dirección MAC |
 | CATEGORIA | Hardware, Software, Red, etc. |
-| PRIORIDAD | Baja, Media, Alta, Urgente |
+| PRIORIDAD | Baja, Media, Alta, Crítica |
 | DESCRIPCION | Descripción del problema |
-| ESTADO | Abierto, En Cola, En Proceso, Resuelto, Cerrado, Cancelado |
+| ESTADO | Abierto, En Cola, En Proceso, En Espera, Cerrado, Cancelado |
 | TECNICO_ASIGNADO | Técnico responsable |
 | NOTAS_RESOLUCION | Notas de cierre |
+| HISTORIAL | Historial de cambios |
 | FECHA_CIERRE | Fecha de resolución |
 
-### Hoja: TECNICOS (`tecnicos_db.xlsx`)
+### Tabla: `tecnicos`
 
 | Campo | Descripción |
 |-------|-------------|
@@ -198,7 +197,9 @@ El sistema funciona en red local (LAN) sin necesidad de internet:
 | EMAIL | Correo electrónico |
 | TELEFONO | Teléfono de contacto |
 | ESPECIALIDAD | Área de especialización |
-| ESTADO | Disponible / Ocupado |
+| ESTADO | Disponible / Ocupado / Ausente |
+
+### Tablas adicionales: `equipos`, `red`, `counters`
 
 ---
 
@@ -207,9 +208,9 @@ El sistema funciona en red local (LAN) sin necesidad de internet:
 | Componente | Tecnología |
 |------------|------------|
 | **Framework UI** | Flet 0.81 (Flutter para Python) |
-| **Base de datos** | Excel con openpyxl + pandas |
-| **Servidor** | HTTP con sockets nativos (puerto 5555) |
-| **Actualizaciones** | GitHub API pública (urllib, sin token) |
+| **Base de datos** | SQLite (`sqlite3` stdlib, WAL mode, cero instalación) |
+| **Servidor HTTP** | ThreadedHTTPServer nativo (puerto 5555) |
+| **Tiempo real** | WebSocket (`websockets>=12.0`, puerto 5556) |
 | **Plataforma** | Windows 10/11 con Python 3.11+ embebido |
 | **Notificaciones** | Windows Toast Notifications (winotify) |
 | **Red** | netsh (WiFi), getmac (MAC), socket (LAN) |
@@ -219,11 +220,13 @@ El sistema funciona en red local (LAN) sin necesidad de internet:
 ## 📦 Dependencias
 
 ```
-flet>=0.81.0
+flet>=0.21.0
 pandas>=2.0.0
-openpyxl>=3.1.0
+openpyxl>=3.1.0    # requerido solo para exportar reportes a Excel
 getmac>=0.9.0
 winotify>=1.1.0
+websockets>=12.0   # sincronización en tiempo real entre emisora y receptora
+# sqlite3 ya viene incluido con Python — sin instalación adicional
 ```
 
 ---
@@ -249,7 +252,21 @@ winotify>=1.1.0
 
 ## 📝 Historial de Versiones
 
-### v3.3.0 — 5 de Marzo 2026 (Actual)
+### v5.0.0 — 6 de Marzo 2026 (Actual)
+- ✅ **Migración completa a SQLite** — cero instalación adicional
+  - `sqlite3` está incluido en Python estándar
+  - WAL mode para lecturas concurrentes sin bloqueos
+  - Turno atómico con `INSERT ON CONFLICT DO UPDATE`
+  - Un solo archivo: `tickets.db`
+- ✅ **Servidor WebSocket** (`ws_server.py`) en puerto 5556
+  - Emisoras reciben actualización instantánea sin polling
+  - Auto-reconexiones con reintentos cada 5 s
+  - Fallback HTTP polling cada 30 s
+- ✅ Eliminados `tickets_db.xlsx`, `tecnicos_db.xlsx`, `equipos_db.xlsx`
+- ✅ `notificaciones_windows.py` actualizado a SQLite
+- ✅ `instalador.py` actualizado: crea `tickets.db` en instalación
+
+### v3.3.0 — 5 de Marzo 2026
 - ✅ **Sistema de actualización automática desde GitHub**
   - Verificación de WiFi / Internet / GitHub
   - Comparación de archivos por SHA-256

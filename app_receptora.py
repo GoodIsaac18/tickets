@@ -6161,126 +6161,16 @@ class PanelAdminIT:
 
 def _inicializar_base_datos_automatica():
     """
-    Inicializa automáticamente las bases de datos si no existen o están corruptas.
-    Se ejecuta al inicio de la aplicación.
+    Inicializa automáticamente la base de datos SQLite si no existe.
+    GestorTickets() crea las tablas, índices y técnicos iniciales de forma automática.
     """
-    from pathlib import Path
-    import pandas as pd
+    print("[AUTO-INIT] 🔧 Verificando base de datos SQLite...")
     
-    # Rutas de las bases de datos
-    base_path = Path(__file__).parent
-    EXCEL_DB_PATH = base_path / "tickets_db.xlsx"
-    TECNICOS_DB_PATH = base_path / "tecnicos_db.xlsx"
-    EQUIPOS_DB_PATH = base_path / "equipos_db.xlsx"
-    
-    # Columnas esperadas
-    COLUMNAS_DB = [
-        "ID_TICKET", "TURNO", "FECHA_APERTURA", "USUARIO_AD", "HOSTNAME",
-        "MAC_ADDRESS", "CATEGORIA", "PRIORIDAD", "DESCRIPCION", "ESTADO",
-        "TECNICO_ASIGNADO", "NOTAS_RESOLUCION", "FECHA_CIERRE",
-        "TIEMPO_ESTIMADO"
-    ]
-    
-    COLUMNAS_TECNICOS = [
-        "ID_TECNICO", "NOMBRE", "ESTADO", "ESPECIALIDAD",
-        "TICKETS_ATENDIDOS", "TICKET_ACTUAL", "ULTIMA_ACTIVIDAD",
-        "TELEFONO", "EMAIL"
-    ]
-    
-    COLUMNAS_EQUIPOS = [
-        "MAC_ADDRESS", "NOMBRE_EQUIPO", "HOSTNAME", "USUARIO_ASIGNADO",
-        "GRUPO", "UBICACION", "MARCA", "MODELO", "NUMERO_SERIE",
-        "TIPO_EQUIPO", "SISTEMA_OPERATIVO", "PROCESADOR", "RAM_GB",
-        "DISCO_GB", "FECHA_COMPRA", "GARANTIA_HASTA", "ESTADO_EQUIPO",
-        "NOTAS", "FECHA_REGISTRO", "ULTIMA_CONEXION", "TOTAL_TICKETS"
-    ]
-    
-    def validar_excel(ruta, columnas):
-        """Valida que un archivo Excel tenga las columnas correctas."""
-        try:
-            if not ruta.exists():
-                return False
-            df = pd.read_excel(ruta, engine='openpyxl', nrows=0)
-            return all(col in df.columns for col in columnas[:3])
-        except:
-            return False
-    
-    def crear_db_tickets():
-        """Crea la base de datos de tickets."""
-        try:
-            if EXCEL_DB_PATH.exists():
-                EXCEL_DB_PATH.unlink()
-            df = pd.DataFrame(columns=COLUMNAS_DB)
-            df.to_excel(EXCEL_DB_PATH, index=False, engine='openpyxl')
-            print(f"[AUTO-INIT] ✅ Base de datos de tickets creada")
-            return True
-        except Exception as e:
-            print(f"[AUTO-INIT] ❌ Error creando tickets: {e}")
-            return False
-    
-    def crear_db_tecnicos():
-        """Crea la base de datos de técnicos con datos iniciales."""
-        try:
-            if TECNICOS_DB_PATH.exists():
-                TECNICOS_DB_PATH.unlink()
-            
-            tecnicos_iniciales = []
-            for tec in TECNICOS_EQUIPO:
-                tecnicos_iniciales.append({
-                    "ID_TECNICO": tec["id"],
-                    "NOMBRE": tec["nombre"],
-                    "ESTADO": "Disponible",
-                    "ESPECIALIDAD": tec["especialidad"],
-                    "TICKETS_ATENDIDOS": 0,
-                    "TICKET_ACTUAL": "",
-                    "ULTIMA_ACTIVIDAD": datetime.now(),
-                    "TELEFONO": tec["telefono"],
-                    "EMAIL": tec["email"]
-                })
-            
-            df = pd.DataFrame(tecnicos_iniciales)
-            df.to_excel(TECNICOS_DB_PATH, index=False, engine='openpyxl')
-            print(f"[AUTO-INIT] ✅ Base de datos de técnicos creada ({len(tecnicos_iniciales)} técnicos)")
-            return True
-        except Exception as e:
-            print(f"[AUTO-INIT] ❌ Error creando técnicos: {e}")
-            return False
-    
-    def crear_db_equipos():
-        """Crea la base de datos de equipos."""
-        try:
-            if EQUIPOS_DB_PATH.exists():
-                EQUIPOS_DB_PATH.unlink()
-            df = pd.DataFrame(columns=COLUMNAS_EQUIPOS)
-            df.to_excel(EQUIPOS_DB_PATH, index=False, engine='openpyxl')
-            print(f"[AUTO-INIT] ✅ Base de datos de equipos creada")
-            return True
-        except Exception as e:
-            print(f"[AUTO-INIT] ❌ Error creando equipos: {e}")
-            return False
-    
-    print("[AUTO-INIT] 🔧 Verificando bases de datos...")
-    
-    # Verificar y crear si es necesario
-    if not validar_excel(EXCEL_DB_PATH, COLUMNAS_DB):
-        print("[AUTO-INIT] ⚠️  Base de datos de tickets no válida, recreando...")
-        crear_db_tickets()
-    else:
-        print("[AUTO-INIT] ✓ Tickets OK")
-    
-    if not validar_excel(TECNICOS_DB_PATH, COLUMNAS_TECNICOS):
-        print("[AUTO-INIT] ⚠️  Base de datos de técnicos no válida, recreando...")
-        crear_db_tecnicos()
-    else:
-        print("[AUTO-INIT] ✓ Técnicos OK")
-    
-    if not validar_excel(EQUIPOS_DB_PATH, COLUMNAS_EQUIPOS):
-        print("[AUTO-INIT] ⚠️  Base de datos de equipos no válida, recreando...")
-        crear_db_equipos()
-    else:
-        print("[AUTO-INIT] ✓ Equipos OK")
-    
-    print("[AUTO-INIT] ✅ Verificación completada")
+    try:
+        gestor = GestorTickets()
+        print(f"[AUTO-INIT] ✅ Base de datos lista: {gestor.db_path}")
+    except Exception as e:
+        print(f"[AUTO-INIT] ❌ Error al inicializar la base de datos: {e}")
 
 
 def main(page: Page):
