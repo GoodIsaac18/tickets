@@ -26,7 +26,7 @@ from datetime import datetime
 # =============================================================================
 
 APP_NAME = "Sistema de Tickets IT"
-APP_VERSION = "3.3.0"
+APP_VERSION = "3.3.2"
 APP_NAME_EMISORA = "Tickets IT - Emisora"
 APP_NAME_RECEPTORA = "Tickets IT - Receptora (Panel IT)"
 PYTHON_VERSION = "3.11.9"
@@ -275,6 +275,13 @@ class InstaladorGrafico:
 
         self._configurar_pagina()
         self._mostrar("menu")
+
+    def _safe_update(self):
+        """Actualiza la UI de forma segura desde cualquier thread."""
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _configurar_pagina(self):
         self.page.title = f"Instalador — {APP_NAME}"
@@ -1564,8 +1571,11 @@ class InstaladorGrafico:
             ]),
         ], expand=True, scroll=ft.ScrollMode.AUTO)
 
-        # Iniciar verificación automática en un thread
-        self._verificar_actualizaciones_async()
+        # Iniciar verificación con pequeño delay para que la UI se construya primero
+        def _iniciar_verificacion_diferida():
+            time.sleep(0.3)  # Esperar a que page.add() complete
+            self._verificar_actualizaciones_async()
+        threading.Thread(target=_iniciar_verificacion_diferida, daemon=True).start()
 
         return vista
 
@@ -1582,6 +1592,8 @@ class InstaladorGrafico:
                     hay_actualizacion_disponible,
                 )
 
+                # Refrescar caché de instalación (por si se acaba de actualizar)
+                self.instalacion_existente = detectar_instalacion_existente()
                 info = self.instalacion_existente or {}
                 version_local = info.get("version", "0.0.0")
 
@@ -1589,12 +1601,16 @@ class InstaladorGrafico:
                 self._update_status_icon.name = ft.Icons.WIFI_FIND
                 self._update_status_icon.color = COLOR_SECUNDARIO
                 self._update_status_text.value = "Verificando conexión..."
+                self._update_status_text.color = COLOR_TEXTO
                 self._update_status_sub.value = "Comprobando WiFi e internet..."
                 self._update_progress.value = None
-                self.page.update()
+                self._update_progress.color = COLOR_SECUNDARIO
+                self._btn_actualizar.visible = False
+                self._archivos_container.visible = False
+                self._safe_update()
 
                 conexion = verificar_wifi_conectado()
-                time.sleep(0.5)
+                time.sleep(0.4)
 
                 if not conexion["internet"]:
                     self._update_status_icon.name = ft.Icons.WIFI_OFF
@@ -1607,14 +1623,14 @@ class InstaladorGrafico:
                     )
                     self._update_progress.value = 0
                     self._update_progress.color = COLOR_ERROR
-                    self.page.update()
+                    self._safe_update()
                     return
 
                 # Paso 2: Conectar a GitHub
                 self._update_status_text.value = "Conectado ✓ Consultando GitHub..."
                 ssid_txt = f" ({conexion['ssid']})" if conexion["ssid"] else ""
                 self._update_status_sub.value = f"{conexion['tipo']}{ssid_txt} — Buscando actualizaciones..."
-                self.page.update()
+                self._safe_update()
 
                 if not conexion["github"]:
                     self._update_status_icon.name = ft.Icons.CLOUD_OFF
@@ -1624,21 +1640,25 @@ class InstaladorGrafico:
                     self._update_status_sub.value = "Internet disponible pero GitHub no responde. Intente más tarde."
                     self._update_progress.value = 0
                     self._update_progress.color = COLOR_WARNING
-                    self.page.update()
+                    self._safe_update()
                     return
 
                 time.sleep(0.3)
 
                 # Paso 3: Obtener versión remota
+                self._update_status_sub.value = "Comparando versiones..."
+                self._safe_update()
                 hay_update, info_remota = hay_actualizacion_disponible(version_local)
 
                 # Paso 4: Obtener commits (changelog)
+                self._update_status_sub.value = "Obteniendo historial de cambios..."
+                self._safe_update()
                 commits = obtener_commits_recientes(12)
 
                 # Mostrar commits en el changelog
                 self._update_changelog.controls.clear()
                 if commits:
-                    for c in commits:
+                    for i, c in enumerate(commits):
                         icono = ft.Icons.NEW_RELEASES if "fix" in c["mensaje"].lower() or "bug" in c["mensaje"].lower() else \
                                 ft.Icons.AUTO_AWESOME if "new" in c["mensaje"].lower() or "add" in c["mensaje"].lower() or "agrega" in c["mensaje"].lower() else \
                                 ft.Icons.CODE
@@ -1665,15 +1685,18 @@ class InstaladorGrafico:
                                 ], spacing=8),
                                 padding=ft.Padding.symmetric(vertical=4, horizontal=6),
                                 border_radius=6,
-                                bgcolor=f"{COLOR_SUPERFICIE_2}" if commits.index(c) % 2 == 0 else "transparent",
+                                bgcolor=f"{COLOR_SUPERFICIE_2}" if i % 2 == 0 else "transparent",
                             )
                         )
                 else:
                     self._update_changelog.controls.append(
                         ft.Text("No se pudieron obtener los commits.", size=12, color=COLOR_TEXTO_SEC)
                     )
+                self._safe_update()
 
                 # Paso 5: Verificar archivos diferentes
+                self._update_status_sub.value = "Comparando archivos locales con GitHub..."
+                self._safe_update()
                 try:
                     archivos_diff = obtener_archivos_diferentes(INSTALL_DIR)
                 except Exception:
@@ -1699,6 +1722,8 @@ class InstaladorGrafico:
                                 ),
                             ], spacing=8)
                         )
+                else:
+                    self._archivos_container.visible = False
 
                 # Actualizar estado final
                 if hay_update and info_remota:
@@ -1748,7 +1773,7 @@ class InstaladorGrafico:
                     self._update_progress.value = 1.0
                     self._update_progress.color = COLOR_EXITO
 
-                self.page.update()
+                self._safe_update()
 
             except Exception as ex:
                 self._update_status_icon.name = ft.Icons.ERROR_OUTLINE
@@ -1758,10 +1783,7 @@ class InstaladorGrafico:
                 self._update_status_sub.value = str(ex)[:80]
                 self._update_progress.value = 0
                 self._update_progress.color = COLOR_ERROR
-                try:
-                    self.page.update()
-                except:
-                    pass
+                self._safe_update()
 
         threading.Thread(target=verificar, daemon=True).start()
 
@@ -1775,7 +1797,7 @@ class InstaladorGrafico:
         self._update_progress.value = None
         self._update_status_text.value = "Descargando actualizaciones..."
         self._update_status_sub.value = "No cierre el instalador..."
-        self.page.update()
+        self._safe_update()
 
         def proceso():
             try:
@@ -1784,10 +1806,7 @@ class InstaladorGrafico:
                 def callback(progreso, msg):
                     self._update_progress.value = progreso if progreso > 0 else None
                     self._update_status_sub.value = msg
-                    try:
-                        self.page.update()
-                    except:
-                        pass
+                    self._safe_update()
 
                 resultado = ejecutar_actualizacion(INSTALL_DIR, archivos, callback)
 
@@ -1799,6 +1818,8 @@ class InstaladorGrafico:
                     self._update_status_text.color = COLOR_EXITO
                     self._update_status_sub.value = f"Backup en: {Path(resultado['backup_dir']).name}"
                     self._btn_actualizar.visible = False
+                    self._archivos_container.visible = False
+                    self._archivos_para_actualizar = None
                     
                     # Actualizar version en install_info.json
                     try:
@@ -1816,6 +1837,9 @@ class InstaladorGrafico:
                     except:
                         pass
                     
+                    # Refrescar caché de instalación para evitar re-detección
+                    self.instalacion_existente = detectar_instalacion_existente()
+                    
                 else:
                     fallidos = resultado.get("archivos_fallidos", [])
                     self._update_status_icon.name = ft.Icons.WARNING
@@ -1827,7 +1851,7 @@ class InstaladorGrafico:
                 self._update_progress.value = 1.0
                 self._btn_actualizar.disabled = False
                 self._btn_actualizar.text = "Actualizar Ahora"
-                self.page.update()
+                self._safe_update()
 
             except Exception as ex:
                 self._update_status_icon.name = ft.Icons.ERROR
@@ -1838,10 +1862,7 @@ class InstaladorGrafico:
                 self._update_progress.value = 0
                 self._btn_actualizar.disabled = False
                 self._btn_actualizar.text = "Reintentar"
-                try:
-                    self.page.update()
-                except:
-                    pass
+                self._safe_update()
 
         threading.Thread(target=proceso, daemon=True).start()
 

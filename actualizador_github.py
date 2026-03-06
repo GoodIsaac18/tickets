@@ -43,6 +43,7 @@ ARCHIVOS_ACTUALIZABLES = [
     "notificaciones_windows.py",
     "instalador.py",
     "actualizador_github.py",
+    "version.json",
 ]
 
 # Archivo local que guarda el estado de actualizaciones
@@ -452,13 +453,22 @@ def hay_actualizacion_disponible(version_local: str) -> Tuple[bool, Optional[Dic
 # =============================================================================
 
 def calcular_hash_archivo(ruta: Path) -> str:
-    """Calcula el hash SHA256 de un archivo local."""
+    """Calcula el hash SHA256 de un archivo local (normaliza line endings)."""
     try:
-        sha256 = hashlib.sha256()
-        with open(ruta, "rb") as f:
-            for bloque in iter(lambda: f.read(8192), b""):
-                sha256.update(bloque)
-        return sha256.hexdigest()
+        # Leer como texto para normalizar \r\n → \n (consistente con GitHub)
+        with open(ruta, "r", encoding="utf-8") as f:
+            contenido = f.read()
+        return hashlib.sha256(contenido.encode("utf-8")).hexdigest()
+    except UnicodeDecodeError:
+        # Archivo binario: leer en modo raw
+        try:
+            sha256 = hashlib.sha256()
+            with open(ruta, "rb") as f:
+                for bloque in iter(lambda: f.read(8192), b""):
+                    sha256.update(bloque)
+            return sha256.hexdigest()
+        except Exception:
+            return ""
     except Exception:
         return ""
 
@@ -545,9 +555,9 @@ def actualizar_archivo(nombre: str, directorio: Path) -> Tuple[bool, str]:
             except SyntaxError as e:
                 return False, f"Error de sintaxis en archivo remoto: {e}"
         
-        # Escribir archivo
-        with open(ruta_destino, "w", encoding="utf-8") as f:
-            f.write(contenido)
+        # Escribir archivo en modo binario para preservar line endings (\n)
+        with open(ruta_destino, "wb") as f:
+            f.write(contenido.encode("utf-8"))
         
         return True, f"Actualizado correctamente"
     except GitHubAPIError as e:

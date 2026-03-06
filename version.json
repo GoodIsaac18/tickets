@@ -1,31 +1,26 @@
 {
-    "version": "3.3.0",
-    "fecha": "2026-03-05",
+    "version": "3.3.2",
+    "fecha": "2026-03-06",
     "critico": false,
-    "descripcion": "Actualizaciones automáticas desde GitHub, correcciones de estabilidad y mejoras de UI",
+    "descripcion": "Fix actualizador: archivos ahora se aplican correctamente, UI actualiza en tiempo real",
     "cambios": [
-        "New: Sistema de actualizaciones automáticas desde GitHub",
-        "New: Módulo actualizador_github.py - verificación WiFi/Internet/GitHub",
-        "New: Comparación de archivos locales vs repositorio por SHA-256",
-        "New: Descarga e instalación de parches con backup automático",
-        "New: version.json para control de versiones remoto",
-        "Fix: Botón 'Entendido' no cerraba el diálogo de turno (modal=False)",
-        "Fix: Panel de seguimiento no aparecía después de enviar ticket",
-        "Fix: Fallback de ticket en memoria cuando servidor no retorna datos",
-        "Fix: Scroll en vista Actualizar del instalador (ScrollMode.AUTO)",
-        "Mejora: Vista Actualizar del instalador reescrita con GitHub en vivo",
-        "Mejora: Animaciones de carga en 10+ operaciones de la Receptora",
-        "Mejora: Instalador v3.3 con detección, desinstalación y formateo",
-        "Mejora: README.md actualizado con documentación completa"
+        "Fix: Actualizador no aplicaba cambios (hashes \r\n vs \n en Windows)",
+        "Fix: Versión no se refrescaba después de actualizar (caché stale)",
+        "Fix: UI no actualizaba en tiempo real durante verificación/actualización",
+        "Fix: Panel de seguimiento no aparecía en PCs remotos (endpoint /ticket/activo_usuario)",
+        "Fix: Accesos directos no se creaban (-ExecutionPolicy Bypass + mkdir)",
+        "Fix: Auto-inicio con Windows ahora habilitado por defecto",
+        "Mejora: Escritura de archivos en modo binario para preservar line endings",
+        "Mejora: Comparación de hashes normaliza line endings (Windows compatible)",
+        "Mejora: version.json incluido en archivos actualizables",
+        "Mejora: Más feedback visual durante cada paso de verificación"
     ],
     "archivos_modificados": [
-        "app_emisora.py",
-        "app_receptora.py",
-        "data_access.py",
-        "instalador.py",
         "actualizador_github.py",
-        "version.json",
-        "README.md"
+        "instalador.py",
+        "servidor_red.py",
+        "app_emisora.py",
+        "version.json"
     ],
     "notas": "Requiere conexión a internet para verificar actualizaciones. El sistema funciona offline normalmente.",
     "compatibilidad": "Python 3.11+, Flet 0.81+, Windows 10/11"
