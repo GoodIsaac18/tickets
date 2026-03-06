@@ -788,63 +788,56 @@ class GestorTickets:
         df = self._leer_datos()
         return df[~df["ESTADO"].isin(["Cerrado", "Cancelado"])]
     
-    def obtener_ticket_activo_usuario(self, usuario_ad: str) -> Optional[Dict]:
+    def obtener_ticket_activo_usuario(self, usuario_ad: str, mac_address: str = "") -> Optional[Dict]:
         """
         Obtiene el ticket activo más reciente de un usuario específico.
-        
-        Args:
-            usuario_ad: Usuario de Active Directory.
-            
-        Returns:
-            Diccionario con el ticket activo o None si no hay.
+        Si se proporciona mac_address, filtra solo tickets de ese dispositivo.
         """
         df = self._leer_datos()
-        # Filtrar por usuario y tickets no cerrados ni cancelados
-        tickets_usuario = df[
+        filtro = (
             (df["USUARIO_AD"].str.lower() == usuario_ad.lower()) & 
             (~df["ESTADO"].isin(["Cerrado", "Cancelado"]))
-        ]
+        )
+        if mac_address:
+            filtro = filtro & (df["MAC_ADDRESS"].str.upper() == mac_address.upper())
+        
+        tickets_usuario = df[filtro]
         
         if tickets_usuario.empty:
             return None
         
-        # Retornar el más reciente
         return tickets_usuario.iloc[-1].to_dict()
 
-    def obtener_tickets_activos_usuario(self, usuario_ad: str) -> list:
+    def obtener_tickets_activos_usuario(self, usuario_ad: str, mac_address: str = "") -> list:
         """
         Obtiene TODOS los tickets activos de un usuario (no cerrados ni cancelados).
-        
-        Args:
-            usuario_ad: Usuario de Active Directory.
-            
-        Returns:
-            Lista de diccionarios con todos los tickets activos.
+        Si se proporciona mac_address, filtra solo tickets de ese dispositivo.
         """
         df = self._leer_datos()
-        tickets_usuario = df[
+        filtro = (
             (df["USUARIO_AD"].str.lower() == usuario_ad.lower()) & 
             (~df["ESTADO"].isin(["Cerrado", "Cancelado"]))
-        ]
+        )
+        if mac_address:
+            filtro = filtro & (df["MAC_ADDRESS"].str.upper() == mac_address.upper())
+        
+        tickets_usuario = df[filtro]
         
         if tickets_usuario.empty:
             return []
         
         return tickets_usuario.to_dict('records')
     
-    def obtener_tickets_usuario(self, usuario_ad: str, limite: int = 20) -> list:
+    def obtener_tickets_usuario(self, usuario_ad: str, limite: int = 20, mac_address: str = "") -> list:
         """
         Obtiene todos los tickets de un usuario (activos + historial).
-        
-        Args:
-            usuario_ad: Usuario de Active Directory.
-            limite: Cantidad máxima de tickets a retornar.
-            
-        Returns:
-            Lista de diccionarios con los tickets, más recientes primero.
+        Si se proporciona mac_address, filtra solo tickets de ese dispositivo.
         """
         df = self._leer_datos()
-        tickets = df[df["USUARIO_AD"].str.lower() == usuario_ad.lower()].copy()
+        filtro = df["USUARIO_AD"].str.lower() == usuario_ad.lower()
+        if mac_address:
+            filtro = filtro & (df["MAC_ADDRESS"].str.upper() == mac_address.upper())
+        tickets = df[filtro].copy()
         
         if tickets.empty:
             return []

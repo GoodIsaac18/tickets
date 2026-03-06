@@ -491,7 +491,7 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             self._enviar_json(500, {"error": str(e)})
     
     def _consultar_ticket_activo_usuario(self, datos: dict):
-        """Busca el ticket activo de un usuario por su usuario_ad."""
+        """Busca el ticket activo de un usuario por su usuario_ad y mac_address."""
         try:
             gestor = _obtener_gestor_tickets()
             if not gestor:
@@ -499,11 +499,12 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 return
             
             usuario_ad = datos.get("usuario_ad", "")
+            mac_address = datos.get("mac_address", "")
             if not usuario_ad:
                 self._enviar_json(400, {"error": "usuario_ad requerido"})
                 return
             
-            ticket = gestor.obtener_ticket_activo_usuario(usuario_ad)
+            ticket = gestor.obtener_ticket_activo_usuario(usuario_ad, mac_address)
             
             if ticket:
                 # Convertir datetime a string para JSON
@@ -531,7 +532,7 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             self._enviar_json(500, {"error": str(e)})
 
     def _consultar_tickets_activos_usuario(self, datos: dict):
-        """Retorna TODOS los tickets activos de un usuario (no cerrados ni cancelados)."""
+        """Retorna TODOS los tickets activos de un usuario filtrados por MAC."""
         try:
             gestor = _obtener_gestor_tickets()
             if not gestor:
@@ -539,11 +540,12 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 return
             
             usuario_ad = datos.get("usuario_ad", "")
+            mac_address = datos.get("mac_address", "")
             if not usuario_ad:
                 self._enviar_json(400, {"error": "usuario_ad requerido"})
                 return
             
-            tickets = gestor.obtener_tickets_activos_usuario(usuario_ad)
+            tickets = gestor.obtener_tickets_activos_usuario(usuario_ad, mac_address)
             
             # Serializar fechas
             tickets_serializables = []
@@ -577,12 +579,13 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 return
             
             usuario_ad = datos.get("usuario_ad", "")
+            mac_address = datos.get("mac_address", "")
             limite = datos.get("limite", 20)
             if not usuario_ad:
                 self._enviar_json(400, {"error": "usuario_ad requerido"})
                 return
             
-            tickets = gestor.obtener_tickets_usuario(usuario_ad, limite)
+            tickets = gestor.obtener_tickets_usuario(usuario_ad, limite, mac_address)
             
             # Serializar datetimes
             tickets_serializables = []
@@ -1649,11 +1652,11 @@ def enviar_recordatorio_ticket(ip: str, puerto: int, id_ticket: str,
         return {"success": False, "error": str(e)}
 
 
-def obtener_tickets_activos_servidor(ip: str, puerto: int, usuario_ad: str) -> Dict:
-    """Obtiene TODOS los tickets activos de un usuario desde el servidor."""
+def obtener_tickets_activos_servidor(ip: str, puerto: int, usuario_ad: str, mac_address: str = "") -> Dict:
+    """Obtiene TODOS los tickets activos de un usuario/MAC desde el servidor."""
     try:
         url = f"http://{ip}:{puerto}/ticket/activos_usuario"
-        data = json.dumps({"usuario_ad": usuario_ad}).encode('utf-8')
+        data = json.dumps({"usuario_ad": usuario_ad, "mac_address": mac_address}).encode('utf-8')
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
@@ -1663,11 +1666,11 @@ def obtener_tickets_activos_servidor(ip: str, puerto: int, usuario_ad: str) -> D
         return {"success": False, "error": str(e), "tickets": []}
 
 
-def obtener_ticket_activo_servidor(ip: str, puerto: int, usuario_ad: str) -> Dict:
-    """Consulta el ticket activo de un usuario en el servidor."""
+def obtener_ticket_activo_servidor(ip: str, puerto: int, usuario_ad: str, mac_address: str = "") -> Dict:
+    """Consulta el ticket activo de un usuario/MAC en el servidor."""
     try:
         url = f"http://{ip}:{puerto}/ticket/activo_usuario"
-        data = json.dumps({"usuario_ad": usuario_ad}).encode('utf-8')
+        data = json.dumps({"usuario_ad": usuario_ad, "mac_address": mac_address}).encode('utf-8')
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
@@ -1688,11 +1691,11 @@ def obtener_estado_servidor(ip: str, puerto: int) -> Dict:
         return {"hay_disponible": False, "tecnicos_disponibles": [], "error": str(e)}
 
 
-def obtener_historial_usuario_servidor(ip: str, puerto: int, usuario_ad: str, limite: int = 20) -> Dict:
-    """Obtiene todos los tickets (activos + historial) de un usuario desde el servidor."""
+def obtener_historial_usuario_servidor(ip: str, puerto: int, usuario_ad: str, limite: int = 20, mac_address: str = "") -> Dict:
+    """Obtiene todos los tickets (activos + historial) de un usuario/MAC desde el servidor."""
     try:
         url = f"http://{ip}:{puerto}/ticket/historial_usuario"
-        data = json.dumps({"usuario_ad": usuario_ad, "limite": limite}).encode('utf-8')
+        data = json.dumps({"usuario_ad": usuario_ad, "limite": limite, "mac_address": mac_address}).encode('utf-8')
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         

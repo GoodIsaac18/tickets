@@ -1260,7 +1260,7 @@ class AppEmisora:
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
                     resultado = obtener_tickets_activos_servidor(
-                        self.servidor_ip, self.servidor_puerto, self.usuario_ad
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, self.mac_address
                     )
                     if resultado.get("success"):
                         tickets_activos = resultado.get("tickets", [])
@@ -1273,11 +1273,11 @@ class AppEmisora:
                     tickets_activos = [self.ticket_activo]
                 else:
                     try:
-                        todos_activos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad)
+                        todos_activos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad, self.mac_address)
                         tickets_activos = todos_activos if todos_activos else []
                     except:
                         try:
-                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad, self.mac_address)
                             tickets_activos = [t] if t else []
                         except:
                             pass
@@ -1286,7 +1286,7 @@ class AppEmisora:
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
                     resultado = obtener_historial_usuario_servidor(
-                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15, self.mac_address
                     )
                     if resultado.get("success"):
                         historial = resultado.get("tickets", [])
@@ -1295,7 +1295,7 @@ class AppEmisora:
             
             if not historial:
                 try:
-                    todos = self.gestor.obtener_tickets_usuario(self.usuario_ad, 15)
+                    todos = self.gestor.obtener_tickets_usuario(self.usuario_ad, 15, self.mac_address)
                     historial = todos if todos else []
                 except:
                     pass
@@ -1853,7 +1853,7 @@ class AppEmisora:
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
                     resultado = obtener_tickets_activos_servidor(
-                        self.servidor_ip, self.servidor_puerto, self.usuario_ad
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, self.mac_address
                     )
                     if resultado.get("success"):
                         tickets_activos = resultado.get("tickets", [])
@@ -1866,11 +1866,11 @@ class AppEmisora:
                     tickets_activos = [ticket_respaldo]
                 else:
                     try:
-                        todos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad)
+                        todos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad, self.mac_address)
                         tickets_activos = todos if todos else []
                     except:
                         try:
-                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad, self.mac_address)
                             tickets_activos = [t] if t else []
                         except:
                             pass
@@ -1879,7 +1879,7 @@ class AppEmisora:
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
                 try:
                     res_hist = obtener_historial_usuario_servidor(
-                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15, self.mac_address
                     )
                     if res_hist.get("success"):
                         historial = res_hist.get("tickets", [])
@@ -1887,7 +1887,7 @@ class AppEmisora:
                     pass
             if not historial:
                 try:
-                    historial = self.gestor.obtener_tickets_usuario(self.usuario_ad, 15) or []
+                    historial = self.gestor.obtener_tickets_usuario(self.usuario_ad, 15, self.mac_address) or []
                 except:
                     pass
 
