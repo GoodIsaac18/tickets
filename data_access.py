@@ -1113,3 +1113,40 @@ class EscanerRed:
 
 # Alias de compatibilidad
 GestorRed = EscanerRed
+
+
+# ---------------------------------------------------------------------------
+# Funciones de red auxiliares (IP local, rango, config servidor)
+# ---------------------------------------------------------------------------
+
+def obtener_ip_local() -> str:
+    """Obtiene la IP local del equipo."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.1)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
+def obtener_rango_red() -> str:
+    """Obtiene el rango de red local en formato CIDR (ej: 192.168.1.0/24)."""
+    ip = obtener_ip_local()
+    partes = ip.rsplit(".", 1)
+    return f"{partes[0]}.0/24" if len(partes) == 2 else "192.168.1.0/24"
+
+
+def guardar_config_servidor(ip: str, puerto: int = SERVIDOR_PUERTO) -> bool:
+    """Guarda la IP y puerto del servidor receptora en servidor_config.txt."""
+    try:
+        SERVIDOR_CONFIG_PATH.write_text(f"{ip}:{puerto}", encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"Error guardando config servidor: {e}")
+        return False
