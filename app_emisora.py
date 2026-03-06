@@ -443,15 +443,26 @@ class AppEmisora:
         import threading
         import time
         
+        # Usar lock para evitar race condition al verificar/setear el flag
         if getattr(self, '_auto_refresco_activo', False):
-            return  # Ya hay un loop corriendo
+            print("[AUTO-REFRESCO] Ya hay un loop corriendo, ignorando")
+            return
         
         self._auto_refresco_activo = True
+        print("[AUTO-REFRESCO] Iniciando loop de auto-refresco")
         
         def _auto_refresco_loop():
-            time.sleep(5)  # Esperar 5s antes del primer refresco
-            while self._auto_refresco_activo and self.servidor_conectado:
+            time.sleep(3)  # Esperar antes del primer refresco
+            fallos_consecutivos = 0
+            
+            while self._auto_refresco_activo:
                 try:
+                    # Verificar condiciones básicas
+                    if not self.servidor_conectado:
+                        print("[AUTO-REFRESCO] Servidor desconectado, esperando...")
+                        time.sleep(5)
+                        continue
+                    
                     if not self.enlazado or not self.servidor_ip:
                         time.sleep(5)
                         continue
@@ -460,32 +471,23 @@ class AppEmisora:
                         time.sleep(5)
                         continue
                     
-                    # Consultar tickets activos desde el servidor
+                    # Consultar tickets activos desde el servidor (timeout aumentado)
                     resultado = obtener_tickets_activos_servidor(
                         self.servidor_ip, self.servidor_puerto, self.usuario_ad, self.mac_address
                     )
                     
                     if not resultado.get("success"):
+                        fallos_consecutivos += 1
+                        error_msg = resultado.get("error", "desconocido")
+                        print(f"[AUTO-REFRESCO] Fallo #{fallos_consecutivos}: {error_msg}")
                         time.sleep(5)
                         continue
                     
+                    # Éxito - resetear contador de fallos
+                    fallos_consecutivos = 0
                     tickets_nuevos = resultado.get("tickets", [])
                     
-                    # Obtener historial
-                    historial = []
-                    try:
-                        res_hist = obtener_historial_usuario_servidor(
-                            self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15, self.mac_address
-                        )
-                        if res_hist.get("success"):
-                            historial = res_hist.get("tickets", [])
-                    except:
-                        pass
-                    
-                    # Siempre actualizar la UI con datos frescos del servidor
-                    ids_activos = [t.get("ID_TICKET", "") for t in tickets_nuevos]
-                    historial_pasado = [t for t in historial if t.get("ID_TICKET", "") not in ids_activos]
-                    
+                    # Actualizar la UI con datos frescos del servidor
                     self._tickets_content.controls.clear()
                     
                     if len(tickets_nuevos) > 1:
@@ -540,18 +542,38 @@ class AppEmisora:
                                 self._crear_boton_envio(),
                             ]
                     
-                    if historial_pasado:
-                        panel_hist = self._build_panel_historial(historial_pasado)
-                        self._tickets_content.controls.append(panel_hist)
+                    # Historial solo cada 3 ciclos para no sobrecargar
+                    ciclo = getattr(self, '_ciclo_refresco', 0) + 1
+                    self._ciclo_refresco = ciclo
+                    if ciclo % 3 == 0:
+                        try:
+                            res_hist = obtener_historial_usuario_servidor(
+                                self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15, self.mac_address
+                            )
+                            if res_hist.get("success"):
+                                historial = res_hist.get("tickets", [])
+                                ids_activos = [t.get("ID_TICKET", "") for t in tickets_nuevos]
+                                historial_pasado = [t for t in historial if t.get("ID_TICKET", "") not in ids_activos]
+                                if historial_pasado:
+                                    panel_hist = self._build_panel_historial(historial_pasado)
+                                    self._tickets_content.controls.append(panel_hist)
+                        except:
+                            pass
                     
-                    self.page.update()
+                    try:
+                        self.page.update()
+                    except Exception as ex_ui:
+                        print(f"[AUTO-REFRESCO] Error al actualizar UI: {ex_ui}")
                     
                 except Exception as ex:
-                    print(f"[AUTO-REFRESCO] Error: {ex}")
+                    print(f"[AUTO-REFRESCO] Error general: {ex}")
+                    import traceback
+                    traceback.print_exc()
                 
-                time.sleep(5)  # Cada 5 segundos
+                time.sleep(5)
             
             self._auto_refresco_activo = False
+            print("[AUTO-REFRESCO] Loop finalizado")
         
         threading.Thread(target=_auto_refresco_loop, daemon=True, name="AutoRefrescoTickets").start()
     
@@ -1394,19 +1416,13 @@ class AppEmisora:
                     print(f"[CLIENTE] Error obteniendo tickets activos del servidor: {e}")
             
             # Fallback: SOLO si el servidor NO responde (error de conexión)
+            # NO usar self.ticket_activo como fallback (puede ser stale/cancelado)
             if not tickets_activos and not servidor_respondio:
-                if self.ticket_activo:
-                    tickets_activos = [self.ticket_activo]
-                else:
-                    try:
-                        todos_activos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad, self.mac_address)
-                        tickets_activos = todos_activos if todos_activos else []
-                    except:
-                        try:
-                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad, self.mac_address)
-                            tickets_activos = [t] if t else []
-                        except:
-                            pass
+                try:
+                    todos_activos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad, self.mac_address)
+                    tickets_activos = todos_activos if todos_activos else []
+                except:
+                    pass
             
             # 2) Obtener historial
             if self.servidor_conectado and self.servidor_ip and self.enlazado:
@@ -1992,20 +2008,16 @@ class AppEmisora:
                 except Exception as ex:
                     print(f"[CLIENTE] Error refrescando tickets: {ex}")
             
-            # Fallback: SOLO si el servidor NO responde
+            # Fallback: SOLO si el servidor NO responde (NO usar datos viejos stale)
             if not tickets_activos and not servidor_respondio:
-                if ticket_respaldo:
-                    tickets_activos = [ticket_respaldo]
-                else:
-                    try:
-                        todos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad, self.mac_address)
-                        tickets_activos = todos if todos else []
-                    except:
-                        try:
-                            t = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad, self.mac_address)
-                            tickets_activos = [t] if t else []
-                        except:
-                            pass
+                print("[CLIENTE] Servidor no respondió, NO se usan datos de respaldo stale")
+                # No usar ticket_respaldo porque puede ser un ticket ya cancelado
+                # Intentar consulta directa al Excel si es posible
+                try:
+                    todos = self.gestor.obtener_tickets_activos_usuario(self.usuario_ad, self.mac_address)
+                    tickets_activos = todos if todos else []
+                except:
+                    pass
 
             # 2) Obtener historial
             if self.servidor_conectado and self.servidor_ip and self.enlazado:

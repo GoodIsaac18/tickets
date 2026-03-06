@@ -548,6 +548,7 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 return
             
             tickets = gestor.obtener_tickets_activos_usuario(usuario_ad, mac_address)
+            print(f"[SERVIDOR] Tickets activos para {usuario_ad} (MAC={mac_address}): {len(tickets)} encontrados")
             
             # Serializar fechas y NaN
             tickets_serializables = []
@@ -1664,7 +1665,7 @@ def obtener_tickets_activos_servidor(ip: str, puerto: int, usuario_ad: str, mac_
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
         return {"success": False, "error": str(e), "tickets": []}
@@ -1678,7 +1679,7 @@ def obtener_ticket_activo_servidor(ip: str, puerto: int, usuario_ad: str, mac_ad
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -1703,7 +1704,7 @@ def obtener_historial_usuario_servidor(ip: str, puerto: int, usuario_ad: str, li
         
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
-        with urllib.request.urlopen(req, timeout=4) as response:
+        with urllib.request.urlopen(req, timeout=8) as response:
             return json.loads(response.read().decode('utf-8'))
     except Exception as e:
         return {"success": False, "error": str(e)}
