@@ -1,5 +1,5 @@
 {
-  "version": "dev-8ee982b",
+  "version": "3.4.0",
   "tipo": "emisora",
   "fecha_instalacion": "2026-03-05 12:18",
   "directorio": "C:\\Users\\PROTECNICA\\Desktop\\tickets\\tickets\\tickets",
@@ -10,5 +10,5 @@
     "firewall": true,
     "crear_db": true
   },
-  "ultima_actualizacion": "2026-03-05 14:36"
+  "ultima_actualizacion": "2026-03-06 11:06"
 }

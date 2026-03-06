@@ -1279,6 +1279,10 @@ class AppEmisora:
             # Construir UI en el hilo principal
             self._tickets_content.controls.clear()
             
+            # Seguridad: ocultar formulario si hay ticket activo
+            if ticket_activo and hasattr(self, '_form_section') and self._form_section.controls:
+                self._form_section.controls.clear()
+            
             # === PANEL TICKET ACTIVO ===
             if ticket_activo:
                 panel_activo = self._build_panel_ticket_activo(ticket_activo)
@@ -1571,11 +1575,68 @@ class AppEmisora:
         )
     
     def _refrescar_ticket(self, e):
-        """Refresca el estado del ticket activo."""
-        self.ticket_activo = None  # Forzar re-consulta al servidor
-        self.page.controls.clear()
-        self._construir_ui()
-        self.page.update()
+        """Refresca el estado del ticket activo consultando al servidor."""
+        import threading
+
+        # Mostrar loading en la sección de tickets (sin perder ticket_activo)
+        if hasattr(self, '_tickets_content') and self._tickets_content:
+            self._tickets_content.controls.clear()
+            self._tickets_content.controls.append(
+                Container(
+                    content=Column([
+                        Row([
+                            Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                            Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        ], spacing=10),
+                        Container(height=15),
+                        Row([
+                            ft.ProgressRing(width=20, height=20, stroke_width=2, color=COLOR_PRIMARIO),
+                            Text("Actualizando ticket...", size=13, color=COLOR_TEXTO_SEC),
+                        ], spacing=10, alignment=MainAxisAlignment.CENTER),
+                        Container(height=15),
+                    ]),
+                    bgcolor=COLOR_TARJETA,
+                    border_radius=ft.BorderRadius.all(12),
+                    padding=ft.Padding.all(20),
+                    margin=ft.Padding.only(left=20, right=20, top=15),
+                )
+            )
+            try:
+                self.page.update()
+            except:
+                pass
+
+        def _refrescar_async():
+            ticket_nuevo = None
+
+            # 1) Consultar servidor
+            if self.servidor_conectado and self.servidor_ip and self.enlazado:
+                try:
+                    resultado = obtener_ticket_activo_servidor(
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad
+                    )
+                    if resultado.get("success") and resultado.get("ticket"):
+                        ticket_nuevo = resultado["ticket"]
+                except Exception as ex:
+                    print(f"[CLIENTE] Error refrescando ticket: {ex}")
+
+            # 2) Fallback: base de datos local
+            if not ticket_nuevo:
+                try:
+                    ticket_nuevo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+                except:
+                    pass
+
+            # 3) Actualizar estado y reconstruir UI completa
+            self.ticket_activo = ticket_nuevo
+            try:
+                self.page.controls.clear()
+                self._construir_ui()
+                self.page.update()
+            except Exception as ex:
+                print(f"[CLIENTE] Error reconstruyendo UI tras refrescar: {ex}")
+
+        threading.Thread(target=_refrescar_async, daemon=True).start()
     
     def _mostrar_dialogo_recordatorio(self):
         """Muestra diálogo para enviar recordatorio con nota opcional."""
@@ -2049,14 +2110,16 @@ class AppEmisora:
         # Siempre mostrar sección "Mis Tickets"
         elementos.append(self._crear_seccion_mis_tickets())
         
-        # Si no hay ticket activo conocido, mostrar formulario también
+        # Formulario envuelto en contenedor togglable (cargar_tickets puede ocultarlo)
+        self._form_section = Column([], spacing=0)
         if not self.ticket_activo:
-            elementos.extend([
+            self._form_section.controls = [
                 seccion_info,
                 self._crear_info_equipo(),
                 self._crear_formulario(),
                 self._crear_boton_envio(),
-            ])
+            ]
+        elementos.append(Container(content=self._form_section))
         
         elementos.append(self._crear_footer())
         
