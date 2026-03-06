@@ -18,8 +18,6 @@ getmac>=0.9.0
 
 # Notificaciones del sistema Windows (toast notifications)
 winotify>=1.1.0
-# Base de datos MongoDB (reemplaza Excel como almacenamiento principal)
-pymongo>=4.0.0
-
 # Servidor y cliente WebSocket (sincronización en tiempo real via push)
+# SQLite ya viene incluido con Python — sin instalación adicional
 websockets>=12.0
