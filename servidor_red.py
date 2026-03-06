@@ -507,13 +507,15 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             ticket = gestor.obtener_ticket_activo_usuario(usuario_ad, mac_address)
             
             if ticket:
-                # Convertir datetime a string para JSON
+                # Convertir datetime a string y NaN a None para JSON
                 ticket_serializable = {}
                 for k, v in ticket.items():
                     if hasattr(v, 'strftime'):
                         ticket_serializable[k] = v.strftime("%Y-%m-%d %H:%M:%S")
                     elif hasattr(v, 'isoformat'):
                         ticket_serializable[k] = v.isoformat()
+                    elif v != v:  # NaN check
+                        ticket_serializable[k] = None
                     else:
                         ticket_serializable[k] = v
                 
@@ -547,7 +549,7 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             
             tickets = gestor.obtener_tickets_activos_usuario(usuario_ad, mac_address)
             
-            # Serializar fechas
+            # Serializar fechas y NaN
             tickets_serializables = []
             for ticket in tickets:
                 t_ser = {}
@@ -556,6 +558,8 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                         t_ser[k] = v.strftime("%Y-%m-%d %H:%M:%S")
                     elif hasattr(v, 'isoformat'):
                         t_ser[k] = v.isoformat()
+                    elif v != v:  # NaN check
+                        t_ser[k] = None
                     else:
                         t_ser[k] = v
                 tickets_serializables.append(t_ser)
