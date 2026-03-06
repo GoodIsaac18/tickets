@@ -435,8 +435,9 @@ class AppEmisora:
         
         threading.Thread(target=heartbeat_loop, daemon=True, name="Heartbeat").start()
         
-        # Iniciar auto-refresco de tickets junto con heartbeat
+        # Iniciar auto-refresco de tickets (fallback polling) y listener WebSocket
         self._iniciar_auto_refresco_tickets()
+        self._iniciar_ws_listener()
     
     def _iniciar_auto_refresco_tickets(self):
         """Inicia un loop que refresca el estado de los tickets cada 5 segundos de forma silenciosa."""
@@ -572,7 +573,8 @@ class AppEmisora:
                     import traceback
                     traceback.print_exc()
                 
-                time.sleep(5)
+                # Polling cada 30s (fallback; WebSocket cubre actualizaciones en tiempo real)
+                time.sleep(30)
             
             self._auto_refresco_activo = False
             print("[AUTO-REFRESCO] Loop finalizado")
@@ -580,8 +582,115 @@ class AppEmisora:
         threading.Thread(target=_auto_refresco_loop, daemon=True, name="AutoRefrescoTickets").start()
     
     def _detener_auto_refresco_tickets(self):
-        """Detiene el loop de auto-refresco."""
+        """Detiene el loop de auto-refresco y el listener WebSocket."""
         self._auto_refresco_activo = False
+        self._ws_listener_activo = False
+    
+    def _iniciar_ws_listener(self):
+        """
+        Conecta al servidor WebSocket (puerto 5556) y recibe eventos push.
+        Cuando llega un evento ticket_creado / ticket_cancelado / ticket_actualizado,
+        fuerza un refresco del panel de tickets.
+        """
+        import threading
+        import json as _json
+        import time as _time
+
+        try:
+            import websockets as _ws_lib
+            import asyncio as _asyncio
+        except ImportError:
+            print("[WS-CLIENTE] websockets no instalado — listener desactivado")
+            return
+
+        self._ws_listener_activo = True
+
+        EVENTOS_REFRESCO = {
+            "ticket_creado", "ticket_actualizado", "ticket_cancelado"
+        }
+
+        def _refrescar_ui_desde_ws():
+            """Ejecuta un refresco visual (mismo código que el auto-refresco)."""
+            try:
+                if not self.servidor_conectado or not self.enlazado or not self.servidor_ip:
+                    return
+                if not hasattr(self, '_tickets_content') or not self._tickets_content:
+                    return
+
+                resultado = obtener_tickets_activos_servidor(
+                    self.servidor_ip, self.servidor_puerto, self.usuario_ad, self.mac_address
+                )
+                if not resultado.get("success"):
+                    return
+
+                tickets_nuevos = resultado.get("tickets", [])
+                self._tickets_content.controls.clear()
+
+                if len(tickets_nuevos) > 1:
+                    self.ticket_activo = tickets_nuevos[-1]
+                    if hasattr(self, '_form_section') and self._form_section.controls:
+                        self._form_section.controls.clear()
+                    self._tickets_content.controls.append(
+                        self._build_panel_tickets_duplicados(tickets_nuevos)
+                    )
+                elif len(tickets_nuevos) == 1:
+                    self.ticket_activo = tickets_nuevos[0]
+                    self._tickets_content.controls.append(
+                        self._build_panel_ticket_activo(tickets_nuevos[0])
+                    )
+                    if hasattr(self, '_form_section') and self._form_section.controls:
+                        self._form_section.controls.clear()
+                else:
+                    self.ticket_activo = None
+
+                self.page.update()
+            except Exception as _e:
+                print(f"[WS-CLIENTE] Error actualizando UI: {_e}")
+
+        async def _ws_loop():
+            uri = f"ws://{self.servidor_ip}:5556"
+            while self._ws_listener_activo:
+                try:
+                    async with _ws_lib.connect(uri, open_timeout=5,
+                                               ping_interval=20, ping_timeout=10) as ws:
+                        # Suscribirse con la identidad del usuario
+                        await ws.send(_json.dumps({
+                            "action": "subscribe",
+                            "usuario_ad": self.usuario_ad,
+                            "mac_address": self.mac_address
+                        }))
+                        print(f"[WS-CLIENTE] Conectado a {uri} como {self.usuario_ad}")
+
+                        async for raw in ws:
+                            if not self._ws_listener_activo:
+                                break
+                            try:
+                                msg = _json.loads(raw)
+                                evento = msg.get("evento", "")
+                                if evento in EVENTOS_REFRESCO:
+                                    print(f"[WS-CLIENTE] Evento recibido: {evento} — refrescando UI")
+                                    threading.Thread(
+                                        target=_refrescar_ui_desde_ws,
+                                        daemon=True, name="WS-UIRefresh"
+                                    ).start()
+                            except Exception:
+                                pass
+
+                except Exception as _ce:
+                    if self._ws_listener_activo:
+                        print(f"[WS-CLIENTE] Conexión cerrada ({_ce}), reintentando en 5s...")
+                        await _asyncio.sleep(5)
+
+        def _run_ws():
+            loop = _asyncio.new_event_loop()
+            _asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(_ws_loop())
+            finally:
+                loop.close()
+
+        threading.Thread(target=_run_ws, daemon=True, name="WS-Listener").start()
+        print("[WS-CLIENTE] Listener iniciado")
     
     def _crear_header(self) -> Container:
         """Crea el encabezado principal con gradiente visual."""

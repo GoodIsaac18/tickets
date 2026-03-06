@@ -2465,6 +2465,17 @@ class PanelAdminIT:
         id_ticket = ticket.get("ID_TICKET", "")
         
         self.gestor.asignar_ticket_a_tecnico(id_ticket, id_tecnico)
+        
+        # Broadcast WebSocket
+        try:
+            import ws_server as _ws
+            _ws.broadcast_global(
+                _ws.EVENTO_TICKET_ACTUALIZADO,
+                {"id_ticket": id_ticket, "estado": "En Proceso"}
+            )
+        except Exception:
+            pass
+        
         self._mostrar_snackbar(f"Ticket asignado a {disponibles.iloc[0]['NOMBRE']}", COLOR_EXITO)
         self._refrescar_vista()
     
@@ -3954,6 +3965,17 @@ class PanelAdminIT:
                     estado=dd_estado.value,
                     notas_resolucion=txt_notas.value
                 )
+                
+                # Broadcast WebSocket — notifíca a la emisora del cambio
+                try:
+                    import ws_server as _ws
+                    _ws.broadcast_global(
+                        _ws.EVENTO_TICKET_ACTUALIZADO,
+                        {"id_ticket": ticket.get("ID_TICKET", ""),
+                         "estado": dd_estado.value}
+                    )
+                except Exception:
+                    pass
                 
                 self._ocultar_carga()
                 self._mostrar_exito("Ticket actualizado", f"El ticket #{ticket.get('ID_TICKET', '')} se actualizó correctamente.")

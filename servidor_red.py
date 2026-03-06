@@ -17,6 +17,14 @@ from datetime import datetime
 from typing import Optional, Callable, Dict, Any, List, Tuple
 from pathlib import Path
 
+# WebSocket server (mismo proceso, puerto 5556)
+try:
+    import ws_server as _ws
+    WS_SERVER_DISPONIBLE = True
+except ImportError:
+    _ws = None
+    WS_SERVER_DISPONIBLE = False
+
 # =============================================================================
 # NOTIFICACIONES DE WINDOWS
 # =============================================================================
@@ -442,6 +450,19 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             
             self._enviar_json(200, {"success": True, "ticket": ticket})
             
+            # === BROADCAST WEBSOCKET ===
+            if WS_SERVER_DISPONIBLE:
+                try:
+                    _ws.broadcast_global(
+                        _ws.EVENTO_TICKET_CREADO,
+                        {"ticket": {
+                            k: (v.isoformat() if hasattr(v, 'isoformat') else v)
+                            for k, v in ticket.items()
+                        }}
+                    )
+                except Exception as _we:
+                    print(f"[WS] Error broadcast ticket_creado: {_we}")
+            
         except Exception as e:
             self._enviar_json(500, {"error": str(e)})
     
@@ -859,6 +880,21 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 "mensaje": "Ticket cancelado correctamente"
             })
             
+            # === BROADCAST WEBSOCKET ===
+            if WS_SERVER_DISPONIBLE:
+                try:
+                    _ws.broadcast_a_usuario(
+                        _ws.EVENTO_TICKET_CANCELADO,
+                        {"id_ticket": id_ticket, "turno": ticket.get("TURNO"), "nota": nota},
+                        usuario_ad=usuario
+                    )
+                    _ws.broadcast_global(
+                        _ws.EVENTO_TICKET_CANCELADO,
+                        {"id_ticket": id_ticket, "turno": ticket.get("TURNO")}
+                    )
+                except Exception as _we:
+                    print(f"[WS] Error broadcast ticket_cancelado: {_we}")
+
         except Exception as e:
             import traceback
             print(f"[SERVIDOR] ERROR en cancelación: {e}")
@@ -1439,6 +1475,13 @@ def iniciar_servidor(puerto: int = PUERTO_HTTP,
         threading.Thread(target=_procesador_cola, daemon=True, name="Msg-Processor").start()
         threading.Thread(target=_monitor_heartbeat, daemon=True, name="Heartbeat-Monitor").start()
         threading.Thread(target=_limpiar_rate_limits, daemon=True, name="RateLimit-Cleaner").start()
+        
+        # Iniciar servidor WebSocket
+        if WS_SERVER_DISPONIBLE:
+            _ws.iniciar_ws_server(puerto=5556, host="0.0.0.0")
+            print(f"[SERVIDOR] WebSocket escuchando en ws://{ip}:5556")
+        else:
+            print("[SERVIDOR] WebSocket no disponible (instala websockets)")
         
         print(f"[SERVIDOR] Escuchando en {ip}:{puerto}")
         print(f"[SERVIDOR] Rate limiting: {RATE_LIMIT_MAX_PETICIONES} peticiones/{RATE_LIMIT_VENTANA}s por IP")
