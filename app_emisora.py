@@ -434,6 +434,78 @@ class AppEmisora:
                 time.sleep(HEARTBEAT_INTERVAL)
         
         threading.Thread(target=heartbeat_loop, daemon=True, name="Heartbeat").start()
+        
+        # Iniciar auto-refresco de tickets junto con heartbeat
+        self._iniciar_auto_refresco_tickets()
+    
+    def _iniciar_auto_refresco_tickets(self):
+        """Inicia un loop que refresca el estado de los tickets cada 30 segundos."""
+        import threading
+        import time
+        
+        if getattr(self, '_auto_refresco_activo', False):
+            return  # Ya hay un loop corriendo
+        
+        self._auto_refresco_activo = True
+        
+        def _auto_refresco_loop():
+            time.sleep(30)  # Esperar 30s antes del primer refresco
+            while self._auto_refresco_activo and self.servidor_conectado:
+                try:
+                    if not self.enlazado or not self.servidor_ip:
+                        time.sleep(15)
+                        continue
+                    
+                    # Solo refrescar si hay ticket activo o estamos en la vista de tickets
+                    if not hasattr(self, '_tickets_content') or not self._tickets_content:
+                        time.sleep(30)
+                        continue
+                    
+                    # Consultar tickets activos
+                    resultado = obtener_tickets_activos_servidor(
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, self.mac_address
+                    )
+                    
+                    if not resultado.get("success"):
+                        time.sleep(30)
+                        continue
+                    
+                    tickets_nuevos = resultado.get("tickets", [])
+                    
+                    # Detectar si hubo cambio comparando estados
+                    estado_anterior = self.ticket_activo.get("ESTADO", "") if self.ticket_activo else ""
+                    estado_nuevo = tickets_nuevos[0].get("ESTADO", "") if tickets_nuevos else ""
+                    
+                    hay_cambio = False
+                    if not self.ticket_activo and tickets_nuevos:
+                        hay_cambio = True
+                    elif self.ticket_activo and not tickets_nuevos:
+                        hay_cambio = True
+                    elif estado_anterior != estado_nuevo:
+                        hay_cambio = True
+                    elif self.ticket_activo and tickets_nuevos:
+                        # Comparar también técnico asignado y turno
+                        if (self.ticket_activo.get("TECNICO_ASIGNADO", "") != tickets_nuevos[0].get("TECNICO_ASIGNADO", "") or
+                            self.ticket_activo.get("TURNO", "") != tickets_nuevos[0].get("TURNO", "")):
+                            hay_cambio = True
+                    
+                    if hay_cambio:
+                        print(f"[AUTO-REFRESCO] Cambio detectado: '{estado_anterior}' -> '{estado_nuevo}'")
+                        # Simular click en refrescar para actualizar toda la sección
+                        self._refrescar_ticket(None)
+                    
+                except Exception as ex:
+                    print(f"[AUTO-REFRESCO] Error: {ex}")
+                
+                time.sleep(30)  # Cada 30 segundos
+            
+            self._auto_refresco_activo = False
+        
+        threading.Thread(target=_auto_refresco_loop, daemon=True, name="AutoRefrescoTickets").start()
+    
+    def _detener_auto_refresco_tickets(self):
+        """Detiene el loop de auto-refresco."""
+        self._auto_refresco_activo = False
     
     def _crear_header(self) -> Container:
         """Crea el encabezado principal con gradiente visual."""
@@ -1383,6 +1455,10 @@ class AppEmisora:
                 pass
         
         threading.Thread(target=cargar_tickets, daemon=True).start()
+        
+        # Iniciar auto-refresco si estamos enlazados
+        if self.enlazado and self.servidor_conectado:
+            self._iniciar_auto_refresco_tickets()
         
         return Container(content=self._tickets_content)
     
