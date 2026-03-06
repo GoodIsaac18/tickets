@@ -162,22 +162,36 @@ def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
                              descripcion: str = "", icono_path: Path = None):
     """Crea un acceso directo (.lnk) a un archivo VBS."""
     try:
+        carpeta.mkdir(parents=True, exist_ok=True)
         icono_linea = ""
         if icono_path and icono_path.exists():
             icono_linea = f'$Shortcut.IconLocation = "{icono_path},0"'
+        
+        lnk_path = str(carpeta / f"{nombre}.lnk")
+        vbs_str = str(vbs_path)
+        workdir = str(vbs_path.parent)
+        
         ps_script = f'''
 $WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("{carpeta / f"{nombre}.lnk"}")
+$Shortcut = $WshShell.CreateShortcut("{lnk_path}")
 $Shortcut.TargetPath = "wscript.exe"
-$Shortcut.Arguments = '"{vbs_path}"'
-$Shortcut.WorkingDirectory = "{vbs_path.parent}"
+$Shortcut.Arguments = '"{vbs_str}"'
+$Shortcut.WorkingDirectory = "{workdir}"
 $Shortcut.Description = "{descripcion}"
 {icono_linea}
 $Shortcut.Save()
 '''
-        subprocess.run(["powershell", "-Command", ps_script], capture_output=True)
+        result = subprocess.run(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            capture_output=True, text=True, timeout=15
+        )
+        if result.returncode != 0:
+            print(f"[INSTALADOR] Error creando acceso directo '{nombre}': {result.stderr}")
+            return False
+        print(f"[INSTALADOR] ✓ Acceso directo creado: {lnk_path}")
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[INSTALADOR] Error creando acceso directo: {e}")
         return False
 
 
@@ -240,7 +254,7 @@ class InstaladorGrafico:
         # Opciones de componentes
         self.opt_escritorio      = True
         self.opt_menu_inicio     = True
-        self.opt_inicio_windows  = False
+        self.opt_inicio_windows  = True
         self.opt_firewall        = True
         self.opt_crear_db        = True
 

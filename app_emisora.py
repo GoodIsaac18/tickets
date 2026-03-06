@@ -38,6 +38,7 @@ from servidor_red import (
     verificar_servidor,
     enviar_recordatorio_ticket,
     cancelar_ticket_servidor,
+    obtener_ticket_activo_servidor,
     HEARTBEAT_INTERVAL
 )
 
@@ -1193,7 +1194,25 @@ class AppEmisora:
     
     def _crear_panel_mi_ticket(self) -> Optional[Container]:
         """Crea el panel que muestra el ticket activo del usuario."""
-        self.ticket_activo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+        # Primero intentar obtener del servidor (para PCs remotos)
+        if self.servidor_conectado and self.servidor_ip and self.enlazado:
+            try:
+                resultado = obtener_ticket_activo_servidor(
+                    self.servidor_ip, self.servidor_puerto, self.usuario_ad
+                )
+                if resultado.get("success") and resultado.get("ticket"):
+                    self.ticket_activo = resultado["ticket"]
+                    print(f"[CLIENTE] Ticket obtenido del servidor: {self.ticket_activo.get('ID_TICKET', 'N/A')}")
+                elif resultado.get("success") and not resultado.get("ticket"):
+                    # Servidor confirmó que no hay ticket activo
+                    self.ticket_activo = None
+                    return None
+            except Exception as e:
+                print(f"[CLIENTE] Error consultando servidor, usando local: {e}")
+        
+        # Fallback: buscar en la base de datos local
+        if not self.ticket_activo:
+            self.ticket_activo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
         
         if not self.ticket_activo:
             return None

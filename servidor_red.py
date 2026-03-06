@@ -347,6 +347,8 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             self._procesar_heartbeat(datos)
         elif self.path == "/ticket/estado":
             self._consultar_ticket(datos)
+        elif self.path == "/ticket/activo_usuario":
+            self._consultar_ticket_activo_usuario(datos)
         # === ENDPOINTS DE ENLACE ===
         elif self.path == "/enlace/solicitar":
             self._solicitar_enlace(datos)
@@ -484,6 +486,46 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self._enviar_json(500, {"error": str(e)})
     
+    def _consultar_ticket_activo_usuario(self, datos: dict):
+        """Busca el ticket activo de un usuario por su usuario_ad."""
+        try:
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"error": "Servicio no disponible"})
+                return
+            
+            usuario_ad = datos.get("usuario_ad", "")
+            if not usuario_ad:
+                self._enviar_json(400, {"error": "usuario_ad requerido"})
+                return
+            
+            ticket = gestor.obtener_ticket_activo_usuario(usuario_ad)
+            
+            if ticket:
+                # Convertir datetime a string para JSON
+                ticket_serializable = {}
+                for k, v in ticket.items():
+                    if hasattr(v, 'strftime'):
+                        ticket_serializable[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                    elif hasattr(v, 'isoformat'):
+                        ticket_serializable[k] = v.isoformat()
+                    else:
+                        ticket_serializable[k] = v
+                
+                posicion = gestor.obtener_posicion_cola(ticket.get("ID_TICKET", ""))
+                self._enviar_json(200, {
+                    "success": True,
+                    "ticket": ticket_serializable,
+                    "posicion_cola": posicion
+                })
+            else:
+                self._enviar_json(200, {"success": True, "ticket": None})
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self._enviar_json(500, {"error": str(e)})
+
     # === MÉTODOS DE ENLACE ===
     
     def _solicitar_enlace(self, datos: dict):
@@ -1524,6 +1566,20 @@ def enviar_recordatorio_ticket(ip: str, puerto: int, id_ticket: str,
         return {"success": False, "error": str(e)}
 
 
+def obtener_ticket_activo_servidor(ip: str, puerto: int, usuario_ad: str) -> Dict:
+    """Consulta el ticket activo de un usuario en el servidor."""
+    try:
+        url = f"http://{ip}:{puerto}/ticket/activo_usuario"
+        data = json.dumps({"usuario_ad": usuario_ad}).encode('utf-8')
+        
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+        
+        with urllib.request.urlopen(req, timeout=8) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def cancelar_ticket_servidor(ip: str, puerto: int, id_ticket: str, 
                              usuario_ad: str = "", nota: str = "") -> Dict:
     """Cancela un ticket existente en el servidor."""
@@ -1706,7 +1762,7 @@ if __name__ == "__main__":
     if iniciar_servidor(callback_ticket=on_ticket, callback_equipo=on_equipo, callback_desconexion=on_desconexion):
         ip = obtener_ip_local()
         print(f"\nServidor: http://{ip}:{PUERTO_HTTP}")
-        print("\nEndpoints: /ping, /equipos, /equipos/online, /ticket/crear")
+        print("\nEndpoints: /ping, /equipos, /equipos/online, /ticket/crear, /ticket/activo_usuario")
         print("Ctrl+C para detener...")
         
         try:
