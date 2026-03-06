@@ -39,6 +39,7 @@ from servidor_red import (
     enviar_recordatorio_ticket,
     cancelar_ticket_servidor,
     obtener_ticket_activo_servidor,
+    obtener_historial_usuario_servidor,
     HEARTBEAT_INTERVAL
 )
 
@@ -1192,48 +1193,173 @@ class AppEmisora:
         
         self.page.add(contenedor)
     
-    def _crear_panel_mi_ticket(self) -> Optional[Container]:
-        """Crea el panel que muestra el ticket activo del usuario."""
-        # Primero intentar obtener del servidor (para PCs remotos)
-        if self.servidor_conectado and self.servidor_ip and self.enlazado:
-            try:
-                resultado = obtener_ticket_activo_servidor(
-                    self.servidor_ip, self.servidor_puerto, self.usuario_ad
+    # =========================================================================
+    # SECCIÓN "MIS TICKETS" — Panel completo con activo + historial
+    # =========================================================================
+    
+    def _crear_seccion_mis_tickets(self) -> Container:
+        """
+        Crea la sección completa 'Mis Tickets' con:
+        - Ticket activo (si existe) con acciones
+        - Historial de tickets anteriores
+        """
+        import threading
+        
+        # Contenedor dinámico que se llenará desde thread
+        self._tickets_content = Column([], spacing=0)
+        
+        # Mostrar loading inicial
+        self._tickets_content.controls = [
+            Container(
+                content=Column([
+                    Row([
+                        Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                        Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    ], spacing=10),
+                    Container(height=15),
+                    Row([
+                        ft.ProgressRing(width=20, height=20, stroke_width=2, color=COLOR_PRIMARIO),
+                        Text("Cargando tus tickets...", size=13, color=COLOR_TEXTO_SEC),
+                    ], spacing=10, alignment=MainAxisAlignment.CENTER),
+                    Container(height=15),
+                ]),
+                bgcolor=COLOR_TARJETA,
+                border_radius=ft.BorderRadius.all(12),
+                padding=ft.Padding.all(20),
+                margin=ft.Padding.only(left=20, right=20, top=15),
+            )
+        ]
+        
+        # Cargar datos en background
+        def cargar_tickets():
+            ticket_activo = None
+            historial = []
+            
+            # 1) Obtener ticket activo
+            if self.servidor_conectado and self.servidor_ip and self.enlazado:
+                try:
+                    resultado = obtener_ticket_activo_servidor(
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad
+                    )
+                    if resultado.get("success") and resultado.get("ticket"):
+                        ticket_activo = resultado["ticket"]
+                        self.ticket_activo = ticket_activo
+                    elif resultado.get("success"):
+                        self.ticket_activo = None
+                except Exception as e:
+                    print(f"[CLIENTE] Error obteniendo ticket activo: {e}")
+            
+            if not ticket_activo and not self.ticket_activo:
+                self.ticket_activo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+                ticket_activo = self.ticket_activo
+            elif self.ticket_activo:
+                ticket_activo = self.ticket_activo
+            
+            # 2) Obtener historial
+            if self.servidor_conectado and self.servidor_ip and self.enlazado:
+                try:
+                    resultado = obtener_historial_usuario_servidor(
+                        self.servidor_ip, self.servidor_puerto, self.usuario_ad, 15
+                    )
+                    if resultado.get("success"):
+                        historial = resultado.get("tickets", [])
+                except Exception as e:
+                    print(f"[CLIENTE] Error obteniendo historial: {e}")
+            
+            if not historial:
+                try:
+                    todos = self.gestor.obtener_tickets_usuario(self.usuario_ad, 15)
+                    historial = todos if todos else []
+                except:
+                    pass
+            
+            # Separar historial (excluir el ticket activo si ya lo mostramos)
+            id_activo = ticket_activo.get("ID_TICKET", "") if ticket_activo else ""
+            historial_pasado = [t for t in historial if t.get("ID_TICKET", "") != id_activo]
+            
+            # Construir UI en el hilo principal
+            self._tickets_content.controls.clear()
+            
+            # === PANEL TICKET ACTIVO ===
+            if ticket_activo:
+                panel_activo = self._build_panel_ticket_activo(ticket_activo)
+                self._tickets_content.controls.append(panel_activo)
+            else:
+                # Mensaje de sin ticket activo
+                self._tickets_content.controls.append(
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                                Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                            ], spacing=10),
+                            Container(height=12),
+                            Container(
+                                content=Row([
+                                    Icon(icons.CHECK_CIRCLE_OUTLINE, size=28, color=COLOR_EXITO),
+                                    Column([
+                                        Text("No tienes tickets activos", size=14, 
+                                             weight=FontWeight.W_600, color=COLOR_TEXTO),
+                                        Text("Puedes crear uno nuevo con el formulario de abajo",
+                                             size=12, color=COLOR_TEXTO_SEC),
+                                    ], spacing=2, expand=True),
+                                ], spacing=12),
+                                bgcolor="#F0FDF4",
+                                padding=ft.Padding.all(14),
+                                border_radius=ft.BorderRadius.all(10),
+                                border=ft.Border.all(1, "#BBF7D0"),
+                            ),
+                        ]),
+                        bgcolor=COLOR_TARJETA,
+                        border_radius=ft.BorderRadius.all(12),
+                        padding=ft.Padding.all(20),
+                        margin=ft.Padding.only(left=20, right=20, top=15),
+                    )
                 )
-                if resultado.get("success") and resultado.get("ticket"):
-                    self.ticket_activo = resultado["ticket"]
-                    print(f"[CLIENTE] Ticket obtenido del servidor: {self.ticket_activo.get('ID_TICKET', 'N/A')}")
-                elif resultado.get("success") and not resultado.get("ticket"):
-                    # Servidor confirmó que no hay ticket activo
-                    self.ticket_activo = None
-                    return None
-            except Exception as e:
-                print(f"[CLIENTE] Error consultando servidor, usando local: {e}")
+            
+            # === HISTORIAL ===
+            if historial_pasado:
+                panel_hist = self._build_panel_historial(historial_pasado)
+                self._tickets_content.controls.append(panel_hist)
+            
+            try:
+                self.page.update()
+            except:
+                pass
         
-        # Fallback: buscar en la base de datos local
-        if not self.ticket_activo:
-            self.ticket_activo = self.gestor.obtener_ticket_activo_usuario(self.usuario_ad)
+        threading.Thread(target=cargar_tickets, daemon=True).start()
         
-        if not self.ticket_activo:
-            return None
+        return Container(content=self._tickets_content)
+    
+    def _build_panel_ticket_activo(self, ticket: dict) -> Container:
+        """Construye el panel visual del ticket activo con acciones."""
+        estado = ticket.get("ESTADO", "Abierto")
+        turno = ticket.get("TURNO", "-")
+        id_ticket = ticket.get("ID_TICKET", "-")
+        categoria = ticket.get("CATEGORIA", "-")
+        descripcion = ticket.get("DESCRIPCION", "")
+        tecnico = ticket.get("TECNICO_ASIGNADO", "")
         
-        estado = self.ticket_activo.get("ESTADO", "Abierto")
-        turno = self.ticket_activo.get("TURNO", "-")
-        id_ticket = self.ticket_activo.get("ID_TICKET", "-")
-        categoria = self.ticket_activo.get("CATEGORIA", "-")
-        posicion = self.gestor.obtener_posicion_cola(id_ticket)
+        posicion = 0
+        try:
+            posicion = self.gestor.obtener_posicion_cola(id_ticket)
+        except:
+            pass
         
         # Colores según estado
         colores_estado = {
-            "Abierto": (COLOR_ADVERTENCIA, "#FFFBEB", icons.HOURGLASS_EMPTY),
-            "En Cola": (COLOR_INFO, "#E0F2FE", icons.QUEUE),
-            "En Proceso": (COLOR_PRIMARIO, "#EFF6FF", icons.ENGINEERING),
-            "En Espera": (COLOR_TEXTO_SEC, "#F1F5F9", icons.PAUSE_CIRCLE),
+            "Abierto": (COLOR_ADVERTENCIA, "#FFFBEB", icons.HOURGLASS_EMPTY, "En espera de asignación"),
+            "En Cola": (COLOR_INFO, "#E0F2FE", icons.QUEUE, f"Posición #{posicion}" if posicion else "En cola"),
+            "En Proceso": (COLOR_PRIMARIO, "#EFF6FF", icons.ENGINEERING, f"Atendido por {tecnico}" if tecnico else "Un técnico te atiende"),
+            "En Espera": (COLOR_TEXTO_SEC, "#F1F5F9", icons.PAUSE_CIRCLE, "Esperando información"),
         }
-        color, color_fondo, icono = colores_estado.get(estado, (COLOR_INFO, "#E0F2FE", icons.INFO))
+        color, color_fondo, icono, estado_desc = colores_estado.get(
+            estado, (COLOR_INFO, "#E0F2FE", icons.INFO, estado)
+        )
         
-        # Obtener fecha del ticket
-        fecha_ticket = self.ticket_activo.get("FECHA_APERTURA", "")
+        # Formato de fecha
+        fecha_ticket = ticket.get("FECHA_APERTURA", "")
+        fecha_str = "Hoy"
         if fecha_ticket:
             try:
                 if hasattr(fecha_ticket, 'strftime'):
@@ -1242,84 +1368,99 @@ class AppEmisora:
                     fecha_str = str(fecha_ticket)[:16]
             except:
                 fecha_str = "Hoy"
-        else:
-            fecha_str = "Hoy"
         
         return Container(
             content=Column([
-                # Header
+                # Header con título y badge de estado
                 Row([
                     Row([
-                        Icon(icons.CONFIRMATION_NUMBER, size=18, color=color),
-                        Text("Tu Ticket Activo", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
-                    ], spacing=8),
+                        Icon(icons.CONFIRMATION_NUMBER, size=20, color=COLOR_PRIMARIO),
+                        Text("Mis Tickets", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    ], spacing=10),
                     Container(
-                        content=Text(estado, size=10, color=colors.WHITE, weight=FontWeight.W_500),
-                        bgcolor=color,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=4),
-                        border_radius=ft.BorderRadius.all(10),
+                        content=Row([
+                            Container(
+                                width=8, height=8,
+                                border_radius=ft.BorderRadius.all(4),
+                                bgcolor=color,
+                            ),
+                            Text(estado, size=11, color=color, weight=FontWeight.W_600),
+                        ], spacing=5),
+                        bgcolor=color_fondo,
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+                        border_radius=ft.BorderRadius.all(12),
                     ),
                 ], alignment=MainAxisAlignment.SPACE_BETWEEN),
                 
                 Container(height=12),
                 
-                # Turno grande
+                # Card con turno, ticket, fecha
                 Container(
                     content=Row([
                         Column([
-                            Text("TURNO", size=10, color=COLOR_TEXTO_SEC),
-                            Text(turno, size=36, weight=FontWeight.BOLD, color=color),
-                        ], horizontal_alignment=CrossAxisAlignment.CENTER),
+                            Text("TURNO", size=9, color=COLOR_TEXTO_SEC, weight=FontWeight.W_500),
+                            Text(str(turno), size=32, weight=FontWeight.BOLD, color=color),
+                        ], horizontal_alignment=CrossAxisAlignment.CENTER, expand=True),
                         Container(width=1, height=50, bgcolor=COLOR_BORDE),
                         Column([
-                            Text("TICKET", size=10, color=COLOR_TEXTO_SEC),
+                            Text("TICKET", size=9, color=COLOR_TEXTO_SEC, weight=FontWeight.W_500),
                             Text(f"#{id_ticket}", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
                         ], horizontal_alignment=CrossAxisAlignment.CENTER, expand=True),
                         Container(width=1, height=50, bgcolor=COLOR_BORDE),
                         Column([
-                            Text("FECHA", size=10, color=COLOR_TEXTO_SEC),
-                            Text(fecha_str, size=12, weight=FontWeight.W_600, color=COLOR_TEXTO),
-                        ], horizontal_alignment=CrossAxisAlignment.CENTER),
+                            Text("FECHA", size=9, color=COLOR_TEXTO_SEC, weight=FontWeight.W_500),
+                            Text(fecha_str, size=11, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                        ], horizontal_alignment=CrossAxisAlignment.CENTER, expand=True),
                     ], alignment=MainAxisAlignment.SPACE_AROUND),
                     bgcolor=color_fondo,
-                    padding=ft.Padding.all(15),
+                    padding=ft.Padding.all(14),
                     border_radius=ft.BorderRadius.all(10),
                 ),
                 
                 Container(height=10),
                 
-                # Info adicional
+                # Estado descriptivo + categoría
                 Row([
                     Icon(icono, size=16, color=color),
-                    Text(f"{categoria}", size=12, color=COLOR_TEXTO_SEC),
+                    Text(estado_desc, size=12, color=COLOR_TEXTO, weight=FontWeight.W_500),
                     Text("•", color=COLOR_TEXTO_SEC),
-                    Text(f"Posición #{posicion}" if posicion else "Atención prioritaria", size=12, color=COLOR_TEXTO_SEC),
+                    Icon(ICONOS_CATEGORIA.get(categoria, icons.HELP_OUTLINE), size=14, color=COLOR_TEXTO_SEC),
+                    Text(categoria, size=12, color=COLOR_TEXTO_SEC),
                 ], spacing=6),
                 
-                Container(height=15),
-                
-                # Botón refrescar
-                Button(
-                    content=Row([
-                        Icon(icons.REFRESH, color=color, size=16),
-                        Text("Actualizar Estado", color=color, weight=FontWeight.W_500, size=12),
-                    ], spacing=6, alignment=MainAxisAlignment.CENTER),
-                    style=ft.ButtonStyle(
-                        shape=ft.RoundedRectangleBorder(radius=8),
-                        side=ft.BorderSide(1, color),
+                # Descripción resumida
+                Container(
+                    content=Text(
+                        (descripcion[:80] + "...") if len(str(descripcion)) > 80 else str(descripcion),
+                        size=12, color=COLOR_TEXTO_SEC, italic=True,
                     ),
-                    bgcolor=COLOR_TARJETA,
-                    on_click=self._refrescar_ticket,
-                ),
+                    padding=ft.Padding.only(top=8),
+                ) if descripcion else Container(),
                 
-                Container(height=10),
+                Container(height=14),
                 
-                # Botones de acción: Recordatorio y Cancelar
+                # === BOTONES DE ACCIÓN ===
                 Row([
+                    # Actualizar
                     Button(
                         content=Row([
-                            Icon(icons.NOTIFICATIONS_ACTIVE, color=COLOR_ADVERTENCIA, size=16),
-                            Text("Recordatorio", color=COLOR_ADVERTENCIA, weight=FontWeight.W_500, size=11),
+                            Icon(icons.REFRESH, color=COLOR_PRIMARIO, size=15),
+                            Text("Actualizar", color=COLOR_PRIMARIO, weight=FontWeight.W_500, size=11),
+                        ], spacing=4, alignment=MainAxisAlignment.CENTER),
+                        style=ft.ButtonStyle(
+                            shape=ft.RoundedRectangleBorder(radius=8),
+                            side=ft.BorderSide(1, COLOR_PRIMARIO),
+                        ),
+                        bgcolor=COLOR_TARJETA,
+                        on_click=self._refrescar_ticket,
+                        expand=True,
+                    ),
+                    Container(width=6),
+                    # Recordatorio
+                    Button(
+                        content=Row([
+                            Icon(icons.NOTIFICATIONS_ACTIVE, color=COLOR_ADVERTENCIA, size=15),
+                            Text("Recordar", color=COLOR_ADVERTENCIA, weight=FontWeight.W_500, size=11),
                         ], spacing=4, alignment=MainAxisAlignment.CENTER),
                         style=ft.ButtonStyle(
                             shape=ft.RoundedRectangleBorder(radius=8),
@@ -1329,10 +1470,11 @@ class AppEmisora:
                         on_click=lambda e: self._mostrar_dialogo_recordatorio(),
                         expand=True,
                     ),
-                    Container(width=8),
+                    Container(width=6),
+                    # Cancelar
                     Button(
                         content=Row([
-                            Icon(icons.CANCEL, color=COLOR_ERROR, size=16),
+                            Icon(icons.CANCEL, color=COLOR_ERROR, size=15),
                             Text("Cancelar", color=COLOR_ERROR, weight=FontWeight.W_500, size=11),
                         ], spacing=4, alignment=MainAxisAlignment.CENTER),
                         style=ft.ButtonStyle(
@@ -1348,12 +1490,90 @@ class AppEmisora:
             bgcolor=COLOR_TARJETA,
             border=ft.Border.all(2, color),
             border_radius=ft.BorderRadius.all(12),
-            padding=ft.Padding.all(15),
+            padding=ft.Padding.all(18),
             margin=ft.Padding.only(left=20, right=20, top=15),
+        )
+    
+    def _build_panel_historial(self, tickets: list) -> Container:
+        """Construye el panel de historial de tickets anteriores."""
+        filas = []
+        for t in tickets[:10]:  # Máximo 10
+            estado = t.get("ESTADO", "?")
+            turno = t.get("TURNO", "-")
+            categoria = t.get("CATEGORIA", "-")
+            fecha = t.get("FECHA_APERTURA", "")
+            
+            # Formato fecha
+            fecha_str = ""
+            if fecha:
+                try:
+                    if hasattr(fecha, 'strftime'):
+                        fecha_str = fecha.strftime("%d/%m/%y")
+                    else:
+                        fecha_str = str(fecha)[:10]
+                except:
+                    fecha_str = str(fecha)[:10]
+            
+            # Color/icono por estado
+            color_map = {
+                "Cerrado": (COLOR_EXITO, icons.CHECK_CIRCLE),
+                "Cancelado": (COLOR_ERROR, icons.CANCEL),
+                "Abierto": (COLOR_ADVERTENCIA, icons.HOURGLASS_EMPTY),
+                "En Cola": (COLOR_INFO, icons.QUEUE),
+                "En Proceso": (COLOR_PRIMARIO, icons.ENGINEERING),
+                "En Espera": (COLOR_TEXTO_SEC, icons.PAUSE_CIRCLE),
+            }
+            color_e, icono_e = color_map.get(estado, (COLOR_TEXTO_SEC, icons.CIRCLE))
+            
+            filas.append(
+                Container(
+                    content=Row([
+                        Icon(icono_e, size=16, color=color_e),
+                        Container(
+                            content=Text(f"T{turno}", size=11, weight=FontWeight.BOLD, 
+                                        color=COLOR_PRIMARIO),
+                            bgcolor="#EFF6FF",
+                            padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                            border_radius=ft.BorderRadius.all(4),
+                        ),
+                        Text(categoria, size=12, color=COLOR_TEXTO, expand=True),
+                        Text(estado, size=10, color=color_e, weight=FontWeight.W_500),
+                        Text(fecha_str, size=10, color=COLOR_TEXTO_SEC),
+                    ], spacing=8, vertical_alignment=CrossAxisAlignment.CENTER),
+                    padding=ft.Padding.symmetric(vertical=8, horizontal=6),
+                    border_radius=ft.BorderRadius.all(6),
+                    bgcolor="#FAFAFA" if tickets.index(t) % 2 == 0 else "transparent",
+                )
+            )
+        
+        return Container(
+            content=Column([
+                Row([
+                    Icon(icons.HISTORY, size=16, color=COLOR_TEXTO_SEC),
+                    Text("Historial de Tickets", size=13, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                    Container(expand=True),
+                    Container(
+                        content=Text(f"{len(tickets)}", size=10, color=COLOR_PRIMARIO, 
+                                    weight=FontWeight.BOLD),
+                        bgcolor="#EFF6FF",
+                        padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                        border_radius=ft.BorderRadius.all(10),
+                    ),
+                ], spacing=8),
+                Container(height=6),
+                Divider(height=1, color=COLOR_BORDE),
+                Container(height=4),
+                *filas,
+            ]),
+            bgcolor=COLOR_TARJETA,
+            border_radius=ft.BorderRadius.all(12),
+            padding=ft.Padding.all(16),
+            margin=ft.Padding.only(left=20, right=20, top=10, bottom=5),
         )
     
     def _refrescar_ticket(self, e):
         """Refresca el estado del ticket activo."""
+        self.ticket_activo = None  # Forzar re-consulta al servidor
         self.page.controls.clear()
         self._construir_ui()
         self.page.update()
@@ -1799,7 +2019,6 @@ class AppEmisora:
     def _construir_ui(self) -> None:
         """Construye la interfaz completa."""
         self.panel_estado = self._crear_panel_estado()
-        self.panel_mi_ticket = self._crear_panel_mi_ticket()
         
         # Sección 1: Información del equipo
         seccion_info = Container(
@@ -1825,14 +2044,14 @@ class AppEmisora:
         elementos = [
             self._crear_header(),
             self.panel_estado,
-            self._crear_panel_estado_enlace(),  # Panel de estado de enlace
+            self._crear_panel_estado_enlace(),
         ]
         
-        # Agregar panel de ticket activo si existe
-        if self.panel_mi_ticket:
-            elementos.append(self.panel_mi_ticket)
-        else:
-            # Si no hay ticket activo, mostrar el formulario completo
+        # Siempre mostrar sección "Mis Tickets"
+        elementos.append(self._crear_seccion_mis_tickets())
+        
+        # Si no hay ticket activo conocido, mostrar formulario también
+        if not self.ticket_activo:
             elementos.extend([
                 seccion_info,
                 self._crear_info_equipo(),

@@ -811,6 +811,29 @@ class GestorTickets:
         # Retornar el más reciente
         return tickets_usuario.iloc[-1].to_dict()
     
+    def obtener_tickets_usuario(self, usuario_ad: str, limite: int = 20) -> list:
+        """
+        Obtiene todos los tickets de un usuario (activos + historial).
+        
+        Args:
+            usuario_ad: Usuario de Active Directory.
+            limite: Cantidad máxima de tickets a retornar.
+            
+        Returns:
+            Lista de diccionarios con los tickets, más recientes primero.
+        """
+        df = self._leer_datos()
+        tickets = df[df["USUARIO_AD"].str.lower() == usuario_ad.lower()].copy()
+        
+        if tickets.empty:
+            return []
+        
+        # Ordenar por fecha de apertura descendente
+        tickets["FECHA_APERTURA"] = pd.to_datetime(tickets["FECHA_APERTURA"], errors='coerce')
+        tickets = tickets.sort_values("FECHA_APERTURA", ascending=False)
+        
+        return tickets.head(limite).to_dict('records')
+    
     def obtener_mensaje_estado_sistema(self) -> Dict[str, Any]:
         """
         Obtiene el mensaje de estado del sistema para mostrar al usuario.
