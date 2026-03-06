@@ -26,7 +26,7 @@ from datetime import datetime
 # =============================================================================
 
 APP_NAME = "Sistema de Tickets IT"
-APP_VERSION = "3.3.2"
+APP_VERSION = "3.4.0"
 APP_NAME_EMISORA = "Tickets IT - Emisora"
 APP_NAME_RECEPTORA = "Tickets IT - Receptora (Panel IT)"
 PYTHON_VERSION = "3.11.9"

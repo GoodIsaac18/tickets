@@ -1,25 +1,23 @@
 {
-    "version": "3.3.2",
+    "version": "3.4.0",
     "fecha": "2026-03-06",
     "critico": false,
-    "descripcion": "Fix actualizador: archivos ahora se aplican correctamente, UI actualiza en tiempo real",
+    "descripcion": "Mejoras receptora: scroll tablas, auditoría, filtro prioridad, fix escaneo red, dashboard real",
     "cambios": [
-        "Fix: Actualizador no aplicaba cambios (hashes \r\n vs \n en Windows)",
-        "Fix: Versión no se refrescaba después de actualizar (caché stale)",
-        "Fix: UI no actualizaba en tiempo real durante verificación/actualización",
-        "Fix: Panel de seguimiento no aparecía en PCs remotos (endpoint /ticket/activo_usuario)",
-        "Fix: Accesos directos no se creaban (-ExecutionPolicy Bypass + mkdir)",
-        "Fix: Auto-inicio con Windows ahora habilitado por defecto",
-        "Mejora: Escritura de archivos en modo binario para preservar line endings",
-        "Mejora: Comparación de hashes normaliza line endings (Windows compatible)",
-        "Mejora: version.json incluido en archivos actualizables",
-        "Mejora: Más feedback visual durante cada paso de verificación"
+        "Mejora: Scroll horizontal y vertical en todas las tablas (tickets, historial, equipos, red)",
+        "Nueva: Sección de Auditoría y Seguimiento en Historial (usuarios, equipos, categorías problemáticas)",
+        "Nueva: Filtro por prioridad en vista de Tickets (Crítica, Alta, Media, Baja)",
+        "Nueva: Prioridad 'Crítica' añadida al sistema de tickets",
+        "Mejora: Tickets ordenados automáticamente por urgencia (Críticas primero)",
+        "Fix: Escáner de red - botón agregar a inventario ahora funciona correctamente",
+        "Fix: Equipos ya no salen todos offline (referencias dinámicas corregidas)",
+        "Fix: Dashboard usa datos reales en vez de simulados (tendencias, estado equipos)",
+        "Mejora: Insights de día pico, hora pico y usuarios recurrentes en auditoría"
     ],
     "archivos_modificados": [
-        "actualizador_github.py",
+        "app_receptora.py",
+        "data_access.py",
         "instalador.py",
-        "servidor_red.py",
-        "app_emisora.py",
         "version.json"
     ],
     "notas": "Requiere conexión a internet para verificar actualizaciones. El sistema funciona offline normalmente.",

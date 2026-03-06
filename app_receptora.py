@@ -94,9 +94,13 @@ COLOR_AUSENTE = "#9E9E9E"
 COLOR_DESCANSO = "#03A9F4"
 
 # Colores de prioridad
+COLOR_CRITICA = "#D500F9"
 COLOR_ALTA = "#FF5252"
 COLOR_MEDIA = "#FFD600"
 COLOR_BAJA = "#00E676"
+
+# Orden de prioridad (menor número = más urgente)
+ORDEN_PRIORIDAD = {"Crítica": 0, "Alta": 1, "Media": 2, "Baja": 3}
 
 # Colores de categorías
 COLORES_CATEGORIAS = {
@@ -788,26 +792,41 @@ class PanelAdminIT:
         )
     
     def _panel_tendencias_tickets(self, tickets: pd.DataFrame) -> Container:
-        """Panel mostrando tendencias de tickets últimos 7 días."""
+        """Panel mostrando tendencias de tickets últimos 7 días con datos reales."""
         try:
-            # Agrupar por día (últimos 7 días)
             if tickets.empty:
                 return self._panel_vacio("Tendencias de Última Semana")
             
-            # Crear datos de ejemplo en tiempo real
-            dias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-            cantidades = [12, 15, 10, 18, 14, 8, 5]  # Datos simulados
-            max_val = max(cantidades) if cantidades else 20
+            from datetime import timedelta
+            hoy = datetime.now().date()
+            
+            # Calcular tickets reales por cada uno de los últimos 7 días
+            dias_nombres = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+            cantidades = []
+            etiquetas = []
+            
+            df_temp = tickets.copy()
+            df_temp["FECHA_APERTURA"] = pd.to_datetime(df_temp["FECHA_APERTURA"], errors='coerce')
+            df_temp = df_temp.dropna(subset=["FECHA_APERTURA"])
+            
+            for i in range(6, -1, -1):
+                fecha = hoy - timedelta(days=i)
+                conteo = len(df_temp[df_temp["FECHA_APERTURA"].dt.date == fecha])
+                cantidades.append(conteo)
+                etiquetas.append(dias_nombres[fecha.weekday()])
+            
+            max_val = max(cantidades) if cantidades and max(cantidades) > 0 else 1
+            promedio = sum(cantidades) / len(cantidades) if cantidades else 0
             
             barras = []
-            for dia, cant in zip(dias, cantidades):
-                altura = (cant / max_val * 120) if max_val > 0 else 20
+            for dia, cant in zip(etiquetas, cantidades):
+                altura = max((cant / max_val * 120), 4) if max_val > 0 else 4
                 barras.append(
                     Column([
                         Container(
                             width=30,
                             height=altura,
-                            bgcolor=COLOR_PRIMARIO,
+                            bgcolor=COLOR_PRIMARIO if cant > 0 else COLOR_SUPERFICIE_2,
                             border_radius=ft.BorderRadius.only(
                                 top_left=5, top_right=5
                             )
@@ -828,7 +847,7 @@ class PanelAdminIT:
                     Container(height=10),
                     Row([
                         Text("Tickets creados", size=10, color=COLOR_TEXTO_SEC),
-                        Text("Promedio: 11.7", size=10, color=COLOR_ACENTO, weight=FontWeight.BOLD),
+                        Text(f"Promedio: {promedio:.1f}/día", size=10, color=COLOR_ACENTO, weight=FontWeight.BOLD),
                     ], alignment=MainAxisAlignment.SPACE_BETWEEN)
                 ], spacing=8),
                 bgcolor=COLOR_SUPERFICIE,
@@ -836,7 +855,8 @@ class PanelAdminIT:
                 padding=18,
                 expand=True
             )
-        except:
+        except Exception as ex:
+            print(f"[ERROR] Tendencias: {ex}")
             return self._panel_vacio("Tendencias")
     
     def _panel_rendimiento_tecnicos(self, tecnicos: pd.DataFrame, tickets: pd.DataFrame) -> Container:
@@ -911,12 +931,14 @@ class PanelAdminIT:
                 return self._panel_vacio("Distribución por Prioridad")
             
             prioridades = {
+                "Crítica": len(tickets[tickets.get("PRIORIDAD") == "Crítica"]),
                 "Alta": len(tickets[tickets.get("PRIORIDAD") == "Alta"]),
                 "Media": len(tickets[tickets.get("PRIORIDAD") == "Media"]),
                 "Baja": len(tickets[tickets.get("PRIORIDAD") == "Baja"])
             }
             
             colores_pri = {
+                "Crítica": COLOR_CRITICA,
                 "Alta": COLOR_ERROR,
                 "Media": COLOR_ADVERTENCIA,
                 "Baja": COLOR_DISPONIBLE
@@ -961,18 +983,22 @@ class PanelAdminIT:
             return self._panel_vacio("Prioridades")
     
     def _panel_estado_equipos(self) -> Container:
-        """Panel mostrando estado general de equipos."""
+        """Panel mostrando estado real de equipos desde la base de datos."""
         try:
-            # Datos simulados de equipos
-            total_equipos = 247
-            online = 198
-            offline = 35
-            error = 14
+            equipos_db = self.gestor.obtener_equipos()
+            total_equipos = len(equipos_db) if not equipos_db.empty else 0
+            
+            # Contar por estado real
+            activos = len(equipos_db[equipos_db["ESTADO_EQUIPO"] == "Activo"]) if not equipos_db.empty else 0
+            inactivos = len(equipos_db[equipos_db["ESTADO_EQUIPO"] == "Inactivo"]) if not equipos_db.empty else 0
+            mantenimiento = len(equipos_db[equipos_db["ESTADO_EQUIPO"] == "En Mantenimiento"]) if not equipos_db.empty else 0
+            baja = len(equipos_db[equipos_db["ESTADO_EQUIPO"] == "Baja"]) if not equipos_db.empty else 0
             
             items = [
-                ("Online", online, COLOR_DISPONIBLE),
-                ("Offline", offline, COLOR_AUSENTE),
-                ("Error", error, COLOR_ERROR)
+                ("Activos", activos, COLOR_DISPONIBLE),
+                ("Inactivos", inactivos, COLOR_AUSENTE),
+                ("Mantenimiento", mantenimiento, COLOR_ADVERTENCIA),
+                ("Baja", baja, COLOR_ERROR)
             ]
             
             filas = []
@@ -1002,7 +1028,8 @@ class PanelAdminIT:
                 padding=16,
                 expand=True
             )
-        except:
+        except Exception as ex:
+            print(f"[ERROR] Estado equipos: {ex}")
             return self._panel_vacio("Equipos")
     
     def _panel_estado_tecnicos_v2(self, tecnicos: pd.DataFrame) -> Container:
@@ -1077,6 +1104,7 @@ class PanelAdminIT:
                 prioridad = ticket.get("PRIORIDAD", "Media")
                 
                 color_pri = {
+                    "Crítica": COLOR_CRITICA,
                     "Alta": COLOR_ERROR,
                     "Media": COLOR_ADVERTENCIA,
                     "Baja": COLOR_DISPONIBLE
@@ -1247,6 +1275,7 @@ class PanelAdminIT:
                     
                     prioridad = ticket.get("PRIORIDAD", "Media")
                     color_pri = {
+                        "Crítica": COLOR_CRITICA,
                         "Alta": COLOR_ERROR,
                         "Media": COLOR_ADVERTENCIA,
                         "Baja": COLOR_DISPONIBLE
@@ -2066,8 +2095,13 @@ class PanelAdminIT:
     # =========================================================================
     
     def _vista_tickets(self) -> Column:
-        """Vista de gestión de tickets activos (no cerrados)."""
+        """Vista de gestión de tickets activos (no cerrados) con filtro de prioridad."""
         df = self.gestor.obtener_tickets_activos()
+        
+        # Ordenar por prioridad (Crítica > Alta > Media > Baja)
+        if not df.empty and "PRIORIDAD" in df.columns:
+            df["_orden_pri"] = df["PRIORIDAD"].map(ORDEN_PRIORIDAD).fillna(99)
+            df = df.sort_values("_orden_pri").drop(columns=["_orden_pri"])
         
         # Estados sin "Cerrado" (los cerrados van al historial)
         estados_activos = [e for e in ESTADOS_TICKET if e != "Cerrado"]
@@ -2089,6 +2123,20 @@ class PanelAdminIT:
             on_select=lambda e: self._aplicar_filtros()
         )
         
+        self.filtro_prioridad = Dropdown(
+            label="⚡ Prioridad",
+            options=[
+                dropdown.Option("Todas"),
+                dropdown.Option("Crítica"),
+                dropdown.Option("Alta"),
+                dropdown.Option("Media"),
+                dropdown.Option("Baja"),
+            ],
+            value="Todas",
+            width=150,
+            on_select=lambda e: self._aplicar_filtros()
+        )
+        
         self.txt_busqueda = TextField(
             label="Buscar",
             prefix_icon=icons.SEARCH,
@@ -2099,14 +2147,21 @@ class PanelAdminIT:
         # Construir tabla
         self.tabla_tickets = self._construir_tabla_tickets(df)
         
-        # Contenedor de la tabla (para actualización dinámica)
+        # Contenedor de la tabla (con scroll horizontal y vertical)
         self.contenedor_tabla_tickets = Container(
-            content=self.tabla_tickets,
+            content=Column(
+                controls=[Row(controls=[self.tabla_tickets], scroll=ScrollMode.AUTO)],
+                scroll=ScrollMode.AUTO,
+            ),
             bgcolor=COLOR_SUPERFICIE,
             border_radius=ft.BorderRadius.all(10),
             padding=10,
             expand=True
         )
+        
+        # Contadores por prioridad
+        criticas = len(df[df["PRIORIDAD"] == "Crítica"]) if not df.empty and "PRIORIDAD" in df.columns else 0
+        altas = len(df[df["PRIORIDAD"] == "Alta"]) if not df.empty and "PRIORIDAD" in df.columns else 0
         
         return Column([
             Row([
@@ -2118,6 +2173,18 @@ class PanelAdminIT:
                         padding=ft.Padding.symmetric(horizontal=10, vertical=5),
                         border_radius=ft.BorderRadius.all(10)
                     ),
+                    Container(
+                        content=Text(f"⚠ {criticas} críticas", size=12, color=colors.WHITE),
+                        bgcolor=COLOR_CRITICA,
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+                        border_radius=ft.BorderRadius.all(10)
+                    ) if criticas > 0 else Container(),
+                    Container(
+                        content=Text(f"🔴 {altas} altas", size=12, color=colors.WHITE),
+                        bgcolor=COLOR_ALTA,
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
+                        border_radius=ft.BorderRadius.all(10)
+                    ) if altas > 0 else Container(),
                     ft.Button(
                         "Actualizar",
                         icon=icons.REFRESH,
@@ -2135,7 +2202,7 @@ class PanelAdminIT:
                 content=Row([
                     Icon(icons.INFO, color=COLOR_INFO, size=16),
                     Text(
-                        "Solo se muestran tickets activos. Los tickets cerrados están en el Historial.",
+                        "Tickets ordenados por urgencia. Críticas y Altas aparecen primero.",
                         color=COLOR_TEXTO_SEC, size=12
                     )
                 ], spacing=10),
@@ -2146,13 +2213,14 @@ class PanelAdminIT:
             
             Container(height=10),
             
-            # Barra de filtros
+            # Barra de filtros (con prioridad)
             Container(
                 content=Row([
+                    self.filtro_prioridad,
                     self.filtro_estado,
                     self.filtro_categoria,
                     self.txt_busqueda
-                ], spacing=20),
+                ], spacing=15),
                 bgcolor=COLOR_SUPERFICIE,
                 padding=15,
                 border_radius=ft.BorderRadius.all(10)
@@ -2160,7 +2228,7 @@ class PanelAdminIT:
             
             Container(height=15),
             
-            # Tabla de tickets (contenedor dinámico)
+            # Tabla de tickets (contenedor dinámico con scroll)
             self.contenedor_tabla_tickets
         ], expand=True)
     
@@ -2180,6 +2248,7 @@ class PanelAdminIT:
             
             prioridad = row.get("PRIORIDAD", "Media")
             color_prioridad = {
+                "Crítica": COLOR_CRITICA,
                 "Alta": COLOR_ALTA,
                 "Media": COLOR_MEDIA,
                 "Baja": COLOR_BAJA
@@ -2229,8 +2298,12 @@ class PanelAdminIT:
         )
     
     def _aplicar_filtros(self):
-        """Aplica los filtros a la tabla de tickets activos."""
+        """Aplica los filtros a la tabla de tickets activos con soporte de prioridad."""
         df = self.gestor.obtener_tickets_activos()
+        
+        # Filtro de prioridad
+        if hasattr(self, 'filtro_prioridad') and self.filtro_prioridad.value and self.filtro_prioridad.value != "Todas":
+            df = df[df["PRIORIDAD"] == self.filtro_prioridad.value]
         
         if hasattr(self, 'filtro_estado') and self.filtro_estado.value and self.filtro_estado.value != "Todos":
             df = df[df["ESTADO"] == self.filtro_estado.value]
@@ -2246,10 +2319,18 @@ class PanelAdminIT:
                 df["MAC_ADDRESS"].str.lower().str.contains(busqueda, na=False)
             ]
         
-        # Actualizar solo la tabla dentro del contenedor
+        # Ordenar por prioridad (Crítica > Alta > Media > Baja)
+        if not df.empty and "PRIORIDAD" in df.columns:
+            df["_orden_pri"] = df["PRIORIDAD"].map(ORDEN_PRIORIDAD).fillna(99)
+            df = df.sort_values("_orden_pri").drop(columns=["_orden_pri"])
+        
+        # Actualizar tabla dentro del contenedor con scroll
         self.tabla_tickets = self._construir_tabla_tickets(df)
         if hasattr(self, 'contenedor_tabla_tickets'):
-            self.contenedor_tabla_tickets.content = self.tabla_tickets
+            self.contenedor_tabla_tickets.content = Column(
+                controls=[Row(controls=[self.tabla_tickets], scroll=ScrollMode.AUTO)],
+                scroll=ScrollMode.AUTO,
+            )
             self.page.update()
     
     # =========================================================================
@@ -2320,7 +2401,7 @@ class PanelAdminIT:
     def _item_cola(self, ticket: pd.Series, posicion: int) -> Container:
         """Crea un item de la cola."""
         prioridad = ticket.get("PRIORIDAD", "Media")
-        color_prioridad = {"Alta": COLOR_ALTA, "Media": COLOR_MEDIA, "Baja": COLOR_BAJA}.get(prioridad, COLOR_MEDIA)
+        color_prioridad = {"Crítica": COLOR_CRITICA, "Alta": COLOR_ALTA, "Media": COLOR_MEDIA, "Baja": COLOR_BAJA}.get(prioridad, COLOR_MEDIA)
         
         return Container(
             content=Row([
@@ -2392,10 +2473,14 @@ class PanelAdminIT:
     # =========================================================================
     
     def _vista_historial(self) -> Column:
-        """Vista del historial de tickets cerrados (solo lectura)."""
+        """Vista del historial de tickets cerrados con auditoría y análisis."""
         historial = self.gestor.obtener_historial()
+        todos = self.gestor.obtener_todos_tickets()
         
-        # Tabla de historial
+        # ============ PANEL DE AUDITORÍA ============
+        panel_auditoria = self._construir_panel_auditoria(todos)
+        
+        # ============ TABLA DE HISTORIAL ============
         filas = []
         for _, row in historial.iterrows():
             fecha_apertura = row.get("FECHA_APERTURA", "")
@@ -2447,11 +2532,11 @@ class PanelAdminIT:
         
         return Column([
             Row([
-                Text("📚 Historial de Tickets Cerrados", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                Text("📚 Historial y Auditoría", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                 Container(
                     content=Row([
                         Icon(icons.LOCK, color=COLOR_TEXTO_SEC, size=16),
-                        Text(f"{len(historial)} tickets en historial", color=COLOR_TEXTO_SEC)
+                        Text(f"{len(historial)} tickets cerrados", color=COLOR_TEXTO_SEC)
                     ], spacing=5),
                     bgcolor=COLOR_SUPERFICIE,
                     padding=ft.Padding.symmetric(horizontal=15, vertical=8),
@@ -2460,6 +2545,11 @@ class PanelAdminIT:
             ], alignment=MainAxisAlignment.SPACE_BETWEEN),
             
             Container(height=10),
+            
+            # Panel de auditoría (análisis de problemas)
+            panel_auditoria,
+            
+            Container(height=15),
             
             # Mensaje informativo
             Container(
@@ -2477,9 +2567,12 @@ class PanelAdminIT:
             
             Container(height=15),
             
-            # Tabla de historial
+            # Tabla de historial con scroll
             Container(
-                content=tabla_historial if filas else Container(
+                content=Column(
+                    controls=[Row(controls=[tabla_historial], scroll=ScrollMode.AUTO)],
+                    scroll=ScrollMode.AUTO,
+                ) if filas else Container(
                     content=Column([
                         Icon(icons.FOLDER_OPEN, size=60, color=COLOR_TEXTO_SEC),
                         Text("No hay tickets en el historial", size=18, color=COLOR_TEXTO_SEC),
@@ -2493,7 +2586,216 @@ class PanelAdminIT:
                 padding=10,
                 expand=True
             )
-        ], expand=True)
+        ], scroll=ScrollMode.AUTO, expand=True)
+    
+    def _construir_panel_auditoria(self, tickets: pd.DataFrame) -> Container:
+        """Construye panel de auditoría con análisis de equipos/usuarios más problemáticos."""
+        try:
+            if tickets.empty:
+                return Container()
+            
+            # === TOP USUARIOS MÁS PROBLEMÁTICOS ===
+            usuarios_count = tickets["USUARIO_AD"].value_counts().head(5)
+            items_usuarios = []
+            for idx, (usuario, cantidad) in enumerate(usuarios_count.items()):
+                # Obtener categorías más frecuentes de este usuario
+                cats_usuario = tickets[tickets["USUARIO_AD"] == usuario]["CATEGORIA"].value_counts()
+                cat_principal = cats_usuario.index[0] if not cats_usuario.empty else "N/A"
+                
+                color_rank = COLOR_ERROR if idx == 0 else COLOR_ADVERTENCIA if idx < 3 else COLOR_TEXTO_SEC
+                items_usuarios.append(
+                    Container(
+                        content=Row([
+                            Container(
+                                content=Text(f"#{idx+1}", size=11, weight=FontWeight.BOLD, color=colors.WHITE),
+                                width=28, height=28, bgcolor=color_rank,
+                                border_radius=14, alignment=ft.Alignment(0, 0)
+                            ),
+                            Column([
+                                Text(str(usuario)[:20], size=12, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                Text(f"Problema frecuente: {cat_principal}", size=10, color=COLOR_TEXTO_SEC),
+                            ], spacing=1, expand=True),
+                            Container(
+                                content=Text(f"{cantidad}", size=14, weight=FontWeight.BOLD, color=COLOR_ACENTO),
+                            )
+                        ], spacing=10),
+                        padding=ft.Padding.symmetric(horizontal=12, vertical=8),
+                        border=ft.Border(bottom=ft.BorderSide(1, COLOR_SUPERFICIE_2))
+                    )
+                )
+            
+            # === TOP CATEGORÍAS MÁS PROBLEMÁTICAS ===
+            cats_count = tickets["CATEGORIA"].value_counts().head(5)
+            total_tickets = len(tickets)
+            items_categorias = []
+            for cat, cantidad in cats_count.items():
+                porc = (cantidad / total_tickets * 100) if total_tickets > 0 else 0
+                color = COLORES_CATEGORIAS.get(cat, COLOR_TEXTO_SEC)
+                ancho_barra = max((porc / 100 * 180), 8)
+                
+                items_categorias.append(
+                    Column([
+                        Row([
+                            Text(str(cat), size=11, color=COLOR_TEXTO, weight=FontWeight.W_500),
+                            Text(f"{cantidad} ({porc:.0f}%)", size=10, color=COLOR_ACENTO, weight=FontWeight.BOLD)
+                        ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                        Container(
+                            width=ancho_barra, height=14,
+                            bgcolor=color, border_radius=4
+                        )
+                    ], spacing=4)
+                )
+            
+            # === TOP EQUIPOS MÁS PROBLEMÁTICOS ===
+            equipos_count = tickets["HOSTNAME"].value_counts().head(5)
+            items_equipos = []
+            for hostname, cantidad in equipos_count.items():
+                cats_equipo = tickets[tickets["HOSTNAME"] == hostname]["CATEGORIA"].value_counts()
+                cat_freq = cats_equipo.index[0] if not cats_equipo.empty else "N/A"
+                
+                items_equipos.append(
+                    Container(
+                        content=Row([
+                            Icon(icons.COMPUTER, size=16, color=COLOR_ADVERTENCIA),
+                            Column([
+                                Text(str(hostname)[:20], size=12, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                Text(f"Falla frecuente: {cat_freq}", size=10, color=COLOR_TEXTO_SEC),
+                            ], spacing=1, expand=True),
+                            Text(f"{cantidad} tickets", size=11, color=COLOR_ERROR, weight=FontWeight.BOLD)
+                        ], spacing=8),
+                        padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                        border=ft.Border(bottom=ft.BorderSide(1, COLOR_SUPERFICIE_2))
+                    )
+                )
+            
+            # === ANÁLISIS DE POR QUÉ ===
+            # Horarios pico
+            df_temp = tickets.copy()
+            df_temp["FECHA_APERTURA"] = pd.to_datetime(df_temp["FECHA_APERTURA"], errors='coerce')
+            df_temp = df_temp.dropna(subset=["FECHA_APERTURA"])
+            
+            hora_pico = "N/A"
+            dia_pico = "N/A"
+            if not df_temp.empty:
+                horas = df_temp["FECHA_APERTURA"].dt.hour.value_counts()
+                if not horas.empty:
+                    hora_pico = f"{horas.index[0]:02d}:00 - {horas.index[0]+1:02d}:00"
+                dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                dias = df_temp["FECHA_APERTURA"].dt.dayofweek.value_counts()
+                if not dias.empty:
+                    dia_pico = dias_nombres[dias.index[0]]
+            
+            # Tasa de recurrencia (usuarios con más de 3 tickets)
+            recurrentes = len(tickets["USUARIO_AD"].value_counts()[tickets["USUARIO_AD"].value_counts() > 3])
+            
+            return Container(
+                content=Column([
+                    Row([
+                        Icon(icons.ANALYTICS, size=22, color=COLOR_ACENTO),
+                        Text("🔍 Auditoría y Seguimiento de Problemas", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    ], spacing=10),
+                    Container(height=10),
+                    
+                    # Row de 3 paneles
+                    Row([
+                        # Panel usuarios problemáticos
+                        Container(
+                            content=Column([
+                                Row([
+                                    Icon(icons.PERSON_SEARCH, size=16, color=COLOR_ERROR),
+                                    Text("Usuarios con Más Incidencias", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                ], spacing=8),
+                                Divider(height=1, color=COLOR_SUPERFICIE_2),
+                                Column(items_usuarios, spacing=0) if items_usuarios else
+                                    Text("Sin datos suficientes", color=COLOR_TEXTO_SEC, size=12),
+                            ], spacing=8),
+                            bgcolor=COLOR_SUPERFICIE_2,
+                            border_radius=12, padding=14, expand=True,
+                            border=ft.Border.all(1, COLOR_ERROR + "40")
+                        ),
+                        
+                        # Panel categorías
+                        Container(
+                            content=Column([
+                                Row([
+                                    Icon(icons.BUG_REPORT, size=16, color=COLOR_ADVERTENCIA),
+                                    Text("Problemas Más Frecuentes", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                ], spacing=8),
+                                Divider(height=1, color=COLOR_SUPERFICIE_2),
+                                Column(items_categorias, spacing=8) if items_categorias else
+                                    Text("Sin datos suficientes", color=COLOR_TEXTO_SEC, size=12),
+                            ], spacing=8),
+                            bgcolor=COLOR_SUPERFICIE_2,
+                            border_radius=12, padding=14, expand=True,
+                            border=ft.Border.all(1, COLOR_ADVERTENCIA + "40")
+                        ),
+                        
+                        # Panel equipos
+                        Container(
+                            content=Column([
+                                Row([
+                                    Icon(icons.COMPUTER, size=16, color=COLOR_PRIMARIO),
+                                    Text("Equipos Más Problemáticos", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                ], spacing=8),
+                                Divider(height=1, color=COLOR_SUPERFICIE_2),
+                                Column(items_equipos, spacing=0) if items_equipos else
+                                    Text("Sin datos suficientes", color=COLOR_TEXTO_SEC, size=12),
+                            ], spacing=8),
+                            bgcolor=COLOR_SUPERFICIE_2,
+                            border_radius=12, padding=14, expand=True,
+                            border=ft.Border.all(1, COLOR_PRIMARIO + "40")
+                        ),
+                    ], spacing=15),
+                    
+                    Container(height=10),
+                    
+                    # Insights / Por qué
+                    Container(
+                        content=Row([
+                            Container(
+                                content=Column([
+                                    Text("📅 Día con más problemas", size=11, color=COLOR_TEXTO_SEC),
+                                    Text(dia_pico, size=14, weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA),
+                                ], spacing=4, horizontal_alignment=CrossAxisAlignment.CENTER),
+                                expand=True, padding=12, bgcolor=COLOR_SUPERFICIE_2,
+                                border_radius=10, alignment=ft.Alignment(0, 0)
+                            ),
+                            Container(
+                                content=Column([
+                                    Text("⏰ Hora pico de incidencias", size=11, color=COLOR_TEXTO_SEC),
+                                    Text(hora_pico, size=14, weight=FontWeight.BOLD, color=COLOR_PRIMARIO),
+                                ], spacing=4, horizontal_alignment=CrossAxisAlignment.CENTER),
+                                expand=True, padding=12, bgcolor=COLOR_SUPERFICIE_2,
+                                border_radius=10, alignment=ft.Alignment(0, 0)
+                            ),
+                            Container(
+                                content=Column([
+                                    Text("🔄 Usuarios recurrentes (>3)", size=11, color=COLOR_TEXTO_SEC),
+                                    Text(str(recurrentes), size=14, weight=FontWeight.BOLD, color=COLOR_ERROR),
+                                ], spacing=4, horizontal_alignment=CrossAxisAlignment.CENTER),
+                                expand=True, padding=12, bgcolor=COLOR_SUPERFICIE_2,
+                                border_radius=10, alignment=ft.Alignment(0, 0)
+                            ),
+                            Container(
+                                content=Column([
+                                    Text("📊 Total histórico", size=11, color=COLOR_TEXTO_SEC),
+                                    Text(str(total_tickets), size=14, weight=FontWeight.BOLD, color=COLOR_ACENTO),
+                                ], spacing=4, horizontal_alignment=CrossAxisAlignment.CENTER),
+                                expand=True, padding=12, bgcolor=COLOR_SUPERFICIE_2,
+                                border_radius=10, alignment=ft.Alignment(0, 0)
+                            ),
+                        ], spacing=10),
+                    ),
+                ], spacing=5),
+                bgcolor=COLOR_SUPERFICIE,
+                border_radius=15, padding=18,
+                border=ft.Border.all(1, COLOR_ACENTO + "30")
+            )
+        except Exception as ex:
+            print(f"[ERROR] Panel auditoría: {ex}")
+            import traceback
+            traceback.print_exc()
+            return Container()
     
     def _mostrar_detalle_historial(self, ticket: Dict):
         """Muestra el detalle de un ticket del historial (solo lectura)."""
@@ -2957,7 +3259,7 @@ class PanelAdminIT:
                                                    "CATEGORIA", "CANTIDAD", COLORES_CATEGORIAS),
                     self._grafico_barras_horizontal("🎯 Tickets por Prioridad", dist_prioridades,
                                                    "PRIORIDAD", "CANTIDAD", 
-                                                   {"Alta": COLOR_ALTA, "Media": COLOR_MEDIA, "Baja": COLOR_BAJA})
+                                                   {"Crítica": COLOR_CRITICA, "Alta": COLOR_ALTA, "Media": COLOR_MEDIA, "Baja": COLOR_BAJA})
                 ], spacing=20, expand=True),
                 
                 Container(height=30),
@@ -4289,11 +4591,14 @@ class PanelAdminIT:
                 ], wrap=True, spacing=10),
                 Container(height=20),
                 
-                # Tabla de equipos
+                # Tabla de equipos con scroll
                 Text("📋 Lista de Equipos", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
                 Container(height=10),
                 Container(
-                    content=self.tabla_equipos,
+                    content=Column(
+                        controls=[Row(controls=[self.tabla_equipos], scroll=ScrollMode.AUTO)],
+                        scroll=ScrollMode.AUTO,
+                    ),
                     expand=True,
                     border=ft.Border.all(1, COLOR_SUPERFICIE_2),
                     border_radius=10,
@@ -4938,7 +5243,7 @@ class PanelAdminIT:
     # =========================================================================
     
     def _vista_escaner_red(self) -> Column:
-        """Construye la vista del escáner de red."""
+        """Construye la vista del escáner de red con referencias dinámicas."""
         self.escaner = EscanerRed()
         
         # Obtener info rápida de red
@@ -4988,10 +5293,61 @@ class PanelAdminIT:
         )
         self.lbl_progreso = Text("", size=12, color=COLOR_TEXTO_SEC, visible=False)
         
+        # Guardar labels de KPI como atributos para actualización dinámica
+        self._escaner_label_online = Text(str(online_servidor), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
+        self._escaner_label_total_srv = Text(str(total_servidor), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
+        self._escaner_label_total_db = Text(str(total_db), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
+        self._escaner_label_cambios = Text(str(cambios), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
+        
         # Construir tablas
         tabla_conectados = self._construir_tabla_equipos_conectados(equipos_servidor)
         self.tabla_red = self._construir_tabla_red(equipos_red)
         alertas_cambios = self._construir_alertas_cambios(equipos_red)
+        
+        # Guardar contenedores como atributos para actualización dinámica
+        self._escaner_tabla_conectados = Container(
+            content=Column(
+                controls=[Row(controls=[tabla_conectados], scroll=ScrollMode.AUTO)],
+                scroll=ScrollMode.AUTO,
+            ) if equipos_servidor else Text(
+                "No hay equipos conectados al servidor. Inicia un escaneo para detectar equipos en la red.", 
+                color=COLOR_TEXTO_SEC, italic=True
+            ),
+        )
+        
+        self._escaner_tabla_red = Container(
+            content=Column(
+                controls=[Row(controls=[self.tabla_red], scroll=ScrollMode.AUTO)],
+                scroll=ScrollMode.AUTO,
+            ),
+            expand=True,
+            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            border_radius=10,
+            bgcolor=COLOR_SUPERFICIE
+        )
+        
+        self._escaner_alertas = Container(
+            content=alertas_cambios if cambios > 0 else Container(),
+        )
+        
+        # Construir KPI cards con los labels almacenados
+        def _kpi_escaner(titulo, valor_text, icono, color, subtitulo):
+            return Container(
+                content=Column([
+                    Row([
+                        Icon(icono, color=color, size=28),
+                        Text(subtitulo, size=12, color=COLOR_TEXTO_SEC) if subtitulo else Container()
+                    ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                    Container(height=10),
+                    valor_text,
+                    Text(titulo, size=14, color=COLOR_TEXTO_SEC)
+                ], spacing=5),
+                bgcolor=COLOR_SUPERFICIE,
+                border_radius=ft.BorderRadius.all(15),
+                padding=20,
+                width=200,
+                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+            )
         
         # Construir la columna
         return Column(
@@ -5032,12 +5388,12 @@ class PanelAdminIT:
                 ),
                 Container(height=15),
                 
-                # KPIs
+                # KPIs con labels dinámicos
                 Row([
-                    self._kpi_card("Conectados", str(online_servidor), icons.WIFI, COLOR_EXITO, "En línea ahora"),
-                    self._kpi_card("Registrados", str(total_servidor), icons.DEVICES, COLOR_INFO, "En servidor"),
-                    self._kpi_card("En BD", str(total_db), icons.STORAGE, COLOR_ACENTO, "Base datos"),
-                    self._kpi_card("Cambios IP", str(cambios), icons.SWAP_HORIZ, COLOR_ADVERTENCIA, "Detectados"),
+                    _kpi_escaner("Conectados", self._escaner_label_online, icons.WIFI, COLOR_EXITO, "En línea ahora"),
+                    _kpi_escaner("Registrados", self._escaner_label_total_srv, icons.DEVICES, COLOR_INFO, "En servidor"),
+                    _kpi_escaner("En BD", self._escaner_label_total_db, icons.STORAGE, COLOR_ACENTO, "Base datos"),
+                    _kpi_escaner("Cambios IP", self._escaner_label_cambios, icons.SWAP_HORIZ, COLOR_ADVERTENCIA, "Detectados"),
                 ], wrap=True),
                 Container(height=20),
                 
@@ -5056,10 +5412,7 @@ class PanelAdminIT:
                             )
                         ], spacing=10),
                         Container(height=10),
-                        tabla_conectados if equipos_servidor else Text(
-                            "No hay equipos conectados al servidor", 
-                            color=COLOR_TEXTO_SEC, italic=True
-                        )
+                        self._escaner_tabla_conectados
                     ]),
                     bgcolor=COLOR_SUPERFICIE,
                     padding=15,
@@ -5069,7 +5422,7 @@ class PanelAdminIT:
                 Container(height=20),
                 
                 # Alertas de cambios de IP
-                alertas_cambios if cambios > 0 else Container(),
+                self._escaner_alertas,
                 
                 # SECCIÓN: ESCANEO DE RED
                 Container(
@@ -5105,13 +5458,7 @@ class PanelAdminIT:
                 # SECCIÓN: HISTORIAL DE EQUIPOS DETECTADOS
                 Text("📋 Historial de Equipos (Base de Datos)", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
                 Container(height=10),
-                Container(
-                    content=self.tabla_red,
-                    expand=True,
-                    border=ft.Border.all(1, COLOR_SUPERFICIE_2),
-                    border_radius=10,
-                    bgcolor=COLOR_SUPERFICIE
-                )
+                self._escaner_tabla_red
             ],
             scroll=ScrollMode.AUTO,
             expand=True
@@ -5363,13 +5710,22 @@ class PanelAdminIT:
                     equipos_servidor = obtener_equipos_con_estado()
                     equipos_online = obtener_equipos_online()
                     
-                    # Actualizar tabla
+                    # Actualizar tabla de red con scroll
                     tabla_red_nueva = self._construir_tabla_red(equipos_red)
-                    self._escaner_tabla_red.content = tabla_red_nueva
+                    self._escaner_tabla_red.content = Column(
+                        controls=[Row(controls=[tabla_red_nueva], scroll=ScrollMode.AUTO)],
+                        scroll=ScrollMode.AUTO,
+                    )
                     
-                    # Actualizar tabla conectados
+                    # Actualizar tabla conectados con scroll
                     tabla_conectados_nueva = self._construir_tabla_equipos_conectados(equipos_servidor)
-                    self._escaner_tabla_conectados.content = tabla_conectados_nueva
+                    self._escaner_tabla_conectados.content = Column(
+                        controls=[Row(controls=[tabla_conectados_nueva], scroll=ScrollMode.AUTO)],
+                        scroll=ScrollMode.AUTO,
+                    ) if equipos_servidor else Text(
+                        "No hay equipos conectados al servidor",
+                        color=COLOR_TEXTO_SEC, italic=True
+                    )
                     
                     # Actualizar alertas
                     cambios_count = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0

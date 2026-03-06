@@ -136,8 +136,8 @@ ESTADOS_TICKET = ["Abierto", "En Cola", "En Proceso", "En Espera", "Cerrado", "C
 # Estados posibles de técnicos
 ESTADOS_TECNICO = ["Disponible", "Ocupado", "Ausente", "En Descanso"]
 
-# Prioridades de tickets
-PRIORIDADES = ["Alta", "Media", "Baja"]
+# Prioridades de tickets (de mayor a menor urgencia)
+PRIORIDADES = ["Crítica", "Alta", "Media", "Baja"]
 
 # Técnicos del equipo (configuración inicial)
 TECNICOS_EQUIPO = [
