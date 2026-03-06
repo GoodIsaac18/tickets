@@ -1776,7 +1776,7 @@ class PanelAdminIT:
                     on_click=lambda e: cerrar_dialogo(e),
                     style=ft.ButtonStyle(color=COLOR_TEXTO_SEC)
                 ),
-                ft.ElevatedButton(
+                ft.Button(
                     "Agregar Técnico",
                     icon=icons.PERSON_ADD_ROUNDED,
                     bgcolor=COLOR_EXITO,
@@ -1960,7 +1960,7 @@ class PanelAdminIT:
                     icon=icons.CLOSE,
                     on_click=solo_cerrar
                 ),
-                ft.ElevatedButton(
+                ft.Button(
                     "Eliminar",
                     icon=icons.DELETE,
                     bgcolor=COLOR_ERROR,
@@ -2077,7 +2077,7 @@ class PanelAdminIT:
                     icon=icons.CLOSE,
                     on_click=cerrar_dialogo
                 ),
-                ft.ElevatedButton(
+                ft.Button(
                     "Asignar",
                     icon=icons.CHECK,
                     bgcolor=COLOR_PRIMARIO,
@@ -2954,7 +2954,7 @@ class PanelAdminIT:
                 padding=5
             ),
             actions=[
-                ft.ElevatedButton(
+                ft.Button(
                     "Cerrar",
                     icon=icons.CLOSE,
                     bgcolor=COLOR_SUPERFICIE_3,
@@ -3006,14 +3006,14 @@ class PanelAdminIT:
             Row([
                 Text("📊 Centro de Análisis y Reportes", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                 Row([
-                    ft.ElevatedButton(
+                    ft.Button(
                         "Exportar Excel",
                         icon=icons.DOWNLOAD,
                         bgcolor=COLOR_EXITO,
                         color=colors.WHITE,
                         on_click=lambda e: self._exportar_reporte_excel()
                     ),
-                    ft.ElevatedButton(
+                    ft.Button(
                         "Actualizar",
                         icon=icons.REFRESH,
                         bgcolor=COLOR_PRIMARIO,
@@ -4078,7 +4078,7 @@ class PanelAdminIT:
                     icon=icons.CLOSE,
                     on_click=cerrar_dialogo
                 ),
-                ft.ElevatedButton(
+                ft.Button(
                     "Guardar",
                     icon=icons.SAVE,
                     bgcolor=COLOR_PRIMARIO,
@@ -4218,7 +4218,7 @@ class PanelAdminIT:
                 boton_accion(e)
         
         acciones.append(
-            ft.ElevatedButton(
+            ft.Button(
                 content=Row([
                     Icon(icons.CHECK_ROUNDED if tipo == "exito" else icons.ARROW_FORWARD_ROUNDED,
                          color=colors.WHITE, size=16),
@@ -5022,7 +5022,7 @@ class PanelAdminIT:
                         icon=icons.CLOSE,
                         on_click=cerrar_dialogo
                     ),
-                    ft.ElevatedButton(
+                    ft.Button(
                         "Guardar",
                         icon=icons.SAVE,
                         bgcolor=COLOR_EXITO,
@@ -5175,7 +5175,7 @@ class PanelAdminIT:
                     icon=icons.CLOSE,
                     on_click=cerrar_dialogo
                 ),
-                ft.ElevatedButton(
+                ft.Button(
                     "Agregar",
                     icon=icons.ADD,
                     bgcolor=COLOR_EXITO,
@@ -5248,7 +5248,7 @@ class PanelAdminIT:
             actions_alignment=MainAxisAlignment.END,
             actions=[
                 ft.TextButton("Cancelar", icon=icons.CLOSE, on_click=cerrar_dialogo),
-                ft.ElevatedButton(
+                ft.Button(
                     "Eliminar",
                     icon=icons.DELETE,
                     bgcolor=COLOR_ERROR,

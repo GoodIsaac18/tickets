@@ -782,13 +782,26 @@ class GestorTickets:
         rows  = self._consultar(
             "SELECT ESTADO_EQUIPO, COUNT(*) as c FROM equipos GROUP BY ESTADO_EQUIPO"
         )
+        sin_nombre_row = self._consultar_uno(
+            "SELECT COUNT(*) as c FROM equipos WHERE NOMBRE_EQUIPO IS NULL OR NOMBRE_EQUIPO = ''"
+        )
         por_estado = {r["ESTADO_EQUIPO"]: r["c"] for r in rows}
+        total_val   = total["c"] if total else 0
+        activos_val = por_estado.get("Activo", 0)
+        mant_val    = por_estado.get("En Mantenimiento", 0)
+        sin_nombre_val = sin_nombre_row["c"] if sin_nombre_row else 0
         return {
-            "total": total["c"] if total else 0,
-            "activos": por_estado.get("Activo", 0),
+            # Claves originales
+            "total": total_val,
+            "activos": activos_val,
             "inactivos": por_estado.get("Inactivo", 0),
-            "mantenimiento": por_estado.get("En Mantenimiento", 0),
-            "bajas": por_estado.get("Baja", 0)
+            "mantenimiento": mant_val,
+            "bajas": por_estado.get("Baja", 0),
+            # Alias usados en _vista_inventario
+            "total_equipos": total_val,
+            "equipos_activos": activos_val,
+            "equipos_mantenimiento": mant_val,
+            "sin_nombre": sin_nombre_val,
         }
 
     # ------------------------------------------------------------------
