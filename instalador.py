@@ -35,6 +35,10 @@ DEPENDENCIAS = ["flet", "pandas", "openpyxl", "getmac", "winotify"]
 # Detectar si se ejecuta como .exe (PyInstaller) o como .py
 if getattr(sys, 'frozen', False):
     INSTALL_DIR = Path(sys.executable).parent.resolve()
+    # Agregar directorio temporal de PyInstaller al path para imports dinámicos
+    _meipass = getattr(sys, '_MEIPASS', None)
+    if _meipass and _meipass not in sys.path:
+        sys.path.insert(0, _meipass)
 else:
     INSTALL_DIR = Path(__file__).parent.resolve()
 
@@ -1392,7 +1396,7 @@ class InstaladorGrafico:
         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)
 
     # =================================================================
-    # VISTA: ACTUALIZAR
+    # VISTA: ACTUALIZAR (CONECTADA A GITHUB)
     # =================================================================
 
     def _vista_actualizar(self) -> ft.Column:
@@ -1408,87 +1412,424 @@ class InstaladorGrafico:
             self.modo = "instalar"
             self._mostrar("bienvenida")
 
-        # Verificar integridad de archivos
-        archivos_verificar = [
-            ("python_embed/python.exe", PYTHON_EXE.exists()),
-            ("app_emisora.py", (INSTALL_DIR / "app_emisora.py").exists()),
-            ("app_receptora.py", (INSTALL_DIR / "app_receptora.py").exists()),
-            ("data_access.py", (INSTALL_DIR / "data_access.py").exists()),
-            ("servidor_red.py", (INSTALL_DIR / "servidor_red.py").exists()),
-        ]
-        integridad_ok = all(existe for _, existe in archivos_verificar)
-
-        return ft.Column([
-            ft.Row([
-                ft.Icon(ft.Icons.UPDATE, size=24, color=COLOR_SECUNDARIO),
-                ft.Text("Buscar Actualizaciones", size=22, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO),
+        # Contenedor de resultados (se actualiza dinámicamente)
+        self._update_status_icon = ft.Icon(ft.Icons.WIFI_FIND, size=22, color=COLOR_SECUNDARIO)
+        self._update_status_text = ft.Text("Verificando conexión...", size=14, 
+                                            weight=ft.FontWeight.W_500, color=COLOR_TEXTO)
+        self._update_status_sub = ft.Text("Conectando con GitHub...", size=12, color=COLOR_TEXTO_SEC)
+        
+        status_card = ft.Container(
+            content=ft.Row([
+                self._update_status_icon,
+                ft.Column([
+                    self._update_status_text,
+                    self._update_status_sub,
+                ], spacing=2, expand=True),
             ], spacing=12),
-            ft.Container(height=4),
-            ft.Text("Información sobre la instalación actual y actualizaciones disponibles.",
+            bgcolor=COLOR_SUPERFICIE, border_radius=12, padding=16,
+        )
+
+        # Barra de progreso de verificación
+        self._update_progress = ft.ProgressBar(
+            width=400, color=COLOR_SECUNDARIO, bgcolor=f"{COLOR_SECUNDARIO}20",
+            value=None,  # Indeterminado
+        )
+
+        # Contenedor para changelog / commits
+        self._update_changelog = ft.Column([], spacing=4, scroll=ft.ScrollMode.AUTO)
+        changelog_container = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.HISTORY, size=16, color=COLOR_SECUNDARIO),
+                    ft.Text("Historial de Cambios", size=14, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO),
+                ], spacing=8),
+                ft.Container(height=6),
+                self._update_changelog,
+            ], spacing=4),
+            bgcolor=COLOR_SUPERFICIE, border_radius=12, padding=18,
+            height=220,
+        )
+
+        # Contenedor para archivos diferentes
+        self._update_archivos = ft.Column([], spacing=4)
+        archivos_container = ft.Container(
+            content=ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.COMPARE_ARROWS, size=16, color=COLOR_WARNING),
+                    ft.Text("Archivos con Cambios", size=14, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO),
+                ], spacing=8),
+                ft.Container(height=6),
+                self._update_archivos,
+            ], spacing=4),
+            bgcolor=COLOR_SUPERFICIE, border_radius=12, padding=18,
+            visible=False,
+        )
+        self._archivos_container = archivos_container
+
+        # Botón de actualizar (inicialmente oculto)
+        self._btn_actualizar = ft.Button(
+            "Actualizar Ahora",
+            icon=ft.Icons.SYSTEM_UPDATE_ALT,
+            bgcolor=COLOR_EXITO, color=COLOR_TEXTO,
+            width=200, height=48,
+            on_click=lambda e: self._iniciar_actualizacion_github(),
+            visible=False,
+        )
+
+        # Botón de verificar nuevamente
+        btn_reverificar = ft.TextButton(
+            "Verificar de nuevo",
+            icon=ft.Icons.REFRESH,
+            on_click=lambda e: self._verificar_actualizaciones_async(),
+            style=ft.ButtonStyle(color=COLOR_SECUNDARIO),
+        )
+
+        vista = ft.Column([
+            ft.Row([
+                ft.Icon(ft.Icons.CLOUD_DOWNLOAD, size=24, color=COLOR_SECUNDARIO),
+                ft.Text("Actualizaciones en Línea", size=22, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO),
+            ], spacing=12),
+            ft.Container(height=2),
+            ft.Text("Conectado al repositorio de GitHub para buscar nuevas versiones.",
                     size=13, color=COLOR_TEXTO_SEC),
-            ft.Container(height=20),
+            ft.Container(height=4),
 
-            # Versión actual
-            ft.Container(
-                content=ft.Column([
-                    ft.Text("Instalación Actual", size=14, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO),
-                    ft.Container(height=10),
-                    ft.Row([ft.Icon(ft.Icons.INFO, size=15, color=COLOR_SECUNDARIO),
-                            ft.Text(f"Versión: {version_actual}", size=13, color=COLOR_TEXTO)], spacing=8),
-                    ft.Row([ft.Icon(ft.Icons.APPS, size=15, color=COLOR_SECUNDARIO),
-                            ft.Text(f"Tipo: {tipo}", size=13, color=COLOR_TEXTO)], spacing=8),
-                    ft.Row([ft.Icon(ft.Icons.CALENDAR_TODAY, size=15, color=COLOR_SECUNDARIO),
-                            ft.Text(f"Fecha de instalación: {fecha}", size=13, color=COLOR_TEXTO)], spacing=8),
-                ], spacing=6),
-                bgcolor=COLOR_SUPERFICIE, border_radius=12, padding=18,
-            ),
-            ft.Container(height=16),
-
-            # Integridad
-            ft.Container(
-                content=ft.Column([
-                    ft.Text("Verificación de Archivos", size=14, weight=ft.FontWeight.BOLD, color=COLOR_TEXTO),
-                    ft.Container(height=8),
-                    *[ft.Row([
-                        ft.Icon(ft.Icons.CHECK_CIRCLE if ok else ft.Icons.ERROR, size=14,
-                                color=COLOR_EXITO if ok else COLOR_ERROR),
-                        ft.Text(f"{nombre}: {'OK' if ok else 'NO ENCONTRADO'}", size=12, color=COLOR_TEXTO_SEC),
-                    ], spacing=8) for nombre, ok in archivos_verificar],
-                ], spacing=4),
-                bgcolor=COLOR_SUPERFICIE, border_radius=12, padding=18,
-            ),
-            ft.Container(height=16),
-
-            # Estado de actualización
+            # Info de instalación actual
             ft.Container(
                 content=ft.Row([
-                    ft.Icon(ft.Icons.CHECK_CIRCLE if integridad_ok else ft.Icons.WARNING,
-                            size=20, color=COLOR_EXITO if integridad_ok else COLOR_WARNING),
-                    ft.Column([
-                        ft.Text(
-                            "Su instalación está al día" if integridad_ok else "Se detectaron problemas",
-                            size=14, weight=ft.FontWeight.W_500,
-                            color=COLOR_EXITO if integridad_ok else COLOR_WARNING,
-                        ),
-                        ft.Text(
-                            "Todos los archivos del sistema están presentes." if integridad_ok
-                            else "Algunos archivos faltan. Se recomienda reparar o reinstalar.",
-                            size=12, color=COLOR_TEXTO_SEC,
-                        ),
-                    ], spacing=2, expand=True),
-                ], spacing=12),
-                bgcolor=COLOR_SUPERFICIE, border_radius=12, padding=16,
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("VERSIÓN", size=9, color=COLOR_TEXTO_SEC),
+                            ft.Text(version_actual, size=16, weight=ft.FontWeight.BOLD, color=COLOR_PRIMARIO),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                        expand=True,
+                    ),
+                    ft.Container(width=1, height=40, bgcolor=f"{COLOR_TEXTO_SEC}30"),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("TIPO", size=9, color=COLOR_TEXTO_SEC),
+                            ft.Text(tipo, size=14, weight=ft.FontWeight.W_600, color=COLOR_TEXTO),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                        expand=True,
+                    ),
+                    ft.Container(width=1, height=40, bgcolor=f"{COLOR_TEXTO_SEC}30"),
+                    ft.Container(
+                        content=ft.Column([
+                            ft.Text("INSTALADO", size=9, color=COLOR_TEXTO_SEC),
+                            ft.Text(fecha, size=12, weight=ft.FontWeight.W_500, color=COLOR_TEXTO),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                        expand=True,
+                    ),
+                ]),
+                bgcolor=COLOR_SUPERFICIE, border_radius=12, padding=ft.Padding.symmetric(horizontal=12, vertical=14),
             ),
+            ft.Container(height=8),
 
-            ft.Container(expand=True),
+            # Estado + progreso
+            status_card,
+            ft.Container(content=self._update_progress, alignment=ft.Alignment(0, 0), padding=ft.Padding.symmetric(horizontal=20)),
+            ft.Container(height=4),
+
+            # Changelog
+            changelog_container,
+
+            # Archivos diferentes
+            archivos_container,
+
+            ft.Container(height=12),
+
+            # Botones
             ft.Row([
                 ft.TextButton("Volver al menú", icon=ft.Icons.ARROW_BACK, on_click=on_atras),
+                btn_reverificar,
                 ft.Container(expand=True),
+                self._btn_actualizar,
                 ft.Button("Reinstalar", icon=ft.Icons.REFRESH,
                           bgcolor=COLOR_PRIMARIO, color=COLOR_TEXTO,
                           width=160, height=45, on_click=on_reinstalar),
             ]),
-        ], expand=True)
+        ], expand=True, scroll=ft.ScrollMode.AUTO)
+
+        # Iniciar verificación automática en un thread
+        self._verificar_actualizaciones_async()
+
+        return vista
+
+    def _verificar_actualizaciones_async(self):
+        """Inicia la verificación de actualizaciones en un thread."""
+        def verificar():
+            try:
+                from actualizador_github import (
+                    verificar_wifi_conectado,
+                    obtener_version_remota,
+                    obtener_commits_recientes,
+                    obtener_archivos_diferentes,
+                    comparar_versiones,
+                    hay_actualizacion_disponible,
+                )
+
+                info = self.instalacion_existente or {}
+                version_local = info.get("version", "0.0.0")
+
+                # Paso 1: Verificar conexión
+                self._update_status_icon.name = ft.Icons.WIFI_FIND
+                self._update_status_icon.color = COLOR_SECUNDARIO
+                self._update_status_text.value = "Verificando conexión..."
+                self._update_status_sub.value = "Comprobando WiFi e internet..."
+                self._update_progress.value = None
+                self.page.update()
+
+                conexion = verificar_wifi_conectado()
+                time.sleep(0.5)
+
+                if not conexion["internet"]:
+                    self._update_status_icon.name = ft.Icons.WIFI_OFF
+                    self._update_status_icon.color = COLOR_ERROR
+                    self._update_status_text.value = "Sin conexión a internet"
+                    self._update_status_text.color = COLOR_ERROR
+                    self._update_status_sub.value = (
+                        f"Red: {conexion['tipo']} {'(' + conexion['ssid'] + ')' if conexion['ssid'] else ''}" 
+                        if conexion["conectado"] else "No se detectó conexión de red"
+                    )
+                    self._update_progress.value = 0
+                    self._update_progress.color = COLOR_ERROR
+                    self.page.update()
+                    return
+
+                # Paso 2: Conectar a GitHub
+                self._update_status_text.value = "Conectado ✓ Consultando GitHub..."
+                ssid_txt = f" ({conexion['ssid']})" if conexion["ssid"] else ""
+                self._update_status_sub.value = f"{conexion['tipo']}{ssid_txt} — Buscando actualizaciones..."
+                self.page.update()
+
+                if not conexion["github"]:
+                    self._update_status_icon.name = ft.Icons.CLOUD_OFF
+                    self._update_status_icon.color = COLOR_WARNING
+                    self._update_status_text.value = "No se puede acceder a GitHub"
+                    self._update_status_text.color = COLOR_WARNING
+                    self._update_status_sub.value = "Internet disponible pero GitHub no responde. Intente más tarde."
+                    self._update_progress.value = 0
+                    self._update_progress.color = COLOR_WARNING
+                    self.page.update()
+                    return
+
+                time.sleep(0.3)
+
+                # Paso 3: Obtener versión remota
+                hay_update, info_remota = hay_actualizacion_disponible(version_local)
+
+                # Paso 4: Obtener commits (changelog)
+                commits = obtener_commits_recientes(12)
+
+                # Mostrar commits en el changelog
+                self._update_changelog.controls.clear()
+                if commits:
+                    for c in commits:
+                        icono = ft.Icons.NEW_RELEASES if "fix" in c["mensaje"].lower() or "bug" in c["mensaje"].lower() else \
+                                ft.Icons.AUTO_AWESOME if "new" in c["mensaje"].lower() or "add" in c["mensaje"].lower() or "agrega" in c["mensaje"].lower() else \
+                                ft.Icons.CODE
+                        color_icono = COLOR_ERROR if "fix" in c["mensaje"].lower() or "bug" in c["mensaje"].lower() else \
+                                      COLOR_EXITO if "new" in c["mensaje"].lower() or "add" in c["mensaje"].lower() else \
+                                      COLOR_TEXTO_SEC
+
+                        self._update_changelog.controls.append(
+                            ft.Container(
+                                content=ft.Row([
+                                    ft.Icon(icono, size=14, color=color_icono),
+                                    ft.Container(
+                                        content=ft.Text(c["sha"], size=10, color=COLOR_SECUNDARIO,
+                                                        font_family="Consolas"),
+                                        bgcolor=f"{COLOR_SECUNDARIO}15",
+                                        border_radius=4,
+                                        padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                                    ),
+                                    ft.Text(
+                                        c["mensaje"][:60] + ("..." if len(c["mensaje"]) > 60 else ""),
+                                        size=12, color=COLOR_TEXTO, expand=True,
+                                    ),
+                                    ft.Text(c["fecha"], size=10, color=COLOR_TEXTO_SEC),
+                                ], spacing=8),
+                                padding=ft.Padding.symmetric(vertical=4, horizontal=6),
+                                border_radius=6,
+                                bgcolor=f"{COLOR_SUPERFICIE_2}" if commits.index(c) % 2 == 0 else "transparent",
+                            )
+                        )
+                else:
+                    self._update_changelog.controls.append(
+                        ft.Text("No se pudieron obtener los commits.", size=12, color=COLOR_TEXTO_SEC)
+                    )
+
+                # Paso 5: Verificar archivos diferentes
+                try:
+                    archivos_diff = obtener_archivos_diferentes(INSTALL_DIR)
+                except Exception:
+                    archivos_diff = []
+
+                if archivos_diff:
+                    self._archivos_container.visible = True
+                    self._update_archivos.controls.clear()
+                    for a in archivos_diff:
+                        es_faltante = a["estado"] == "faltante"
+                        self._update_archivos.controls.append(
+                            ft.Row([
+                                ft.Icon(
+                                    ft.Icons.ERROR if es_faltante else ft.Icons.CHANGE_CIRCLE,
+                                    size=14,
+                                    color=COLOR_ERROR if es_faltante else COLOR_WARNING,
+                                ),
+                                ft.Text(a["nombre"], size=12, color=COLOR_TEXTO, weight=ft.FontWeight.W_500),
+                                ft.Text(
+                                    "FALTANTE" if es_faltante else "MODIFICADO",
+                                    size=10,
+                                    color=COLOR_ERROR if es_faltante else COLOR_WARNING,
+                                ),
+                            ], spacing=8)
+                        )
+
+                # Actualizar estado final
+                if hay_update and info_remota:
+                    v_remota = info_remota.get("version", "?")
+                    self._update_status_icon.name = ft.Icons.SYSTEM_UPDATE_ALT
+                    self._update_status_icon.color = COLOR_EXITO
+                    self._update_status_text.value = f"¡Actualización disponible! v{v_remota}"
+                    self._update_status_text.color = COLOR_EXITO
+                    
+                    # Mostrar cambios del release
+                    cambios = info_remota.get("cambios", [])
+                    desc = info_remota.get("descripcion", "")
+                    fuente = info_remota.get("fuente", "")
+                    
+                    if cambios:
+                        sub = " • ".join(cambios[:3])
+                    elif desc:
+                        sub = desc[:100]
+                    else:
+                        sub = f"Fuente: {fuente}"
+                    
+                    self._update_status_sub.value = sub
+                    self._btn_actualizar.visible = True
+                    self._update_progress.value = 1.0
+                    self._update_progress.color = COLOR_EXITO
+                    
+                    # Guardar archivos a actualizar
+                    self._archivos_para_actualizar = [a["nombre"] for a in archivos_diff] if archivos_diff else None
+                    
+                elif archivos_diff:
+                    self._update_status_icon.name = ft.Icons.WARNING_AMBER
+                    self._update_status_icon.color = COLOR_WARNING
+                    self._update_status_text.value = f"Hay {len(archivos_diff)} archivo(s) desactualizados"
+                    self._update_status_text.color = COLOR_WARNING
+                    self._update_status_sub.value = "Los archivos locales difieren de la versión en GitHub."
+                    self._btn_actualizar.visible = True
+                    self._update_progress.value = 1.0
+                    self._update_progress.color = COLOR_WARNING
+                    self._archivos_para_actualizar = [a["nombre"] for a in archivos_diff]
+                else:
+                    self._update_status_icon.name = ft.Icons.CHECK_CIRCLE
+                    self._update_status_icon.color = COLOR_EXITO
+                    self._update_status_text.value = "Tu instalación está al día ✓"
+                    self._update_status_text.color = COLOR_EXITO
+                    self._update_status_sub.value = f"Versión {version_local} — Todos los archivos coinciden con GitHub."
+                    self._btn_actualizar.visible = False
+                    self._update_progress.value = 1.0
+                    self._update_progress.color = COLOR_EXITO
+
+                self.page.update()
+
+            except Exception as ex:
+                self._update_status_icon.name = ft.Icons.ERROR_OUTLINE
+                self._update_status_icon.color = COLOR_ERROR
+                self._update_status_text.value = "Error al verificar"
+                self._update_status_text.color = COLOR_ERROR
+                self._update_status_sub.value = str(ex)[:80]
+                self._update_progress.value = 0
+                self._update_progress.color = COLOR_ERROR
+                try:
+                    self.page.update()
+                except:
+                    pass
+
+        threading.Thread(target=verificar, daemon=True).start()
+
+    def _iniciar_actualizacion_github(self):
+        """Inicia el proceso de actualización desde GitHub."""
+        archivos = getattr(self, "_archivos_para_actualizar", None)
+        
+        # Deshabilitar botón
+        self._btn_actualizar.disabled = True
+        self._btn_actualizar.text = "Actualizando..."
+        self._update_progress.value = None
+        self._update_status_text.value = "Descargando actualizaciones..."
+        self._update_status_sub.value = "No cierre el instalador..."
+        self.page.update()
+
+        def proceso():
+            try:
+                from actualizador_github import ejecutar_actualizacion
+
+                def callback(progreso, msg):
+                    self._update_progress.value = progreso if progreso > 0 else None
+                    self._update_status_sub.value = msg
+                    try:
+                        self.page.update()
+                    except:
+                        pass
+
+                resultado = ejecutar_actualizacion(INSTALL_DIR, archivos, callback)
+
+                if resultado["exito"]:
+                    n = len(resultado["archivos_actualizados"])
+                    self._update_status_icon.name = ft.Icons.CELEBRATION
+                    self._update_status_icon.color = COLOR_EXITO
+                    self._update_status_text.value = f"¡Actualización exitosa! ({n} archivos)"
+                    self._update_status_text.color = COLOR_EXITO
+                    self._update_status_sub.value = f"Backup en: {Path(resultado['backup_dir']).name}"
+                    self._btn_actualizar.visible = False
+                    
+                    # Actualizar version en install_info.json
+                    try:
+                        info_path = INSTALL_DIR / "install_info.json"
+                        if info_path.exists():
+                            with open(info_path, "r", encoding="utf-8") as f:
+                                install_info = json.load(f)
+                            from actualizador_github import obtener_version_remota
+                            vr = obtener_version_remota()
+                            if vr and vr.get("version"):
+                                install_info["version"] = vr["version"]
+                                install_info["ultima_actualizacion"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            with open(info_path, "w", encoding="utf-8") as f:
+                                json.dump(install_info, f, indent=2, ensure_ascii=False)
+                    except:
+                        pass
+                    
+                else:
+                    fallidos = resultado.get("archivos_fallidos", [])
+                    self._update_status_icon.name = ft.Icons.WARNING
+                    self._update_status_icon.color = COLOR_WARNING
+                    self._update_status_text.value = "Actualización parcial"
+                    self._update_status_text.color = COLOR_WARNING
+                    self._update_status_sub.value = f"{len(fallidos)} archivo(s) fallaron"
+
+                self._update_progress.value = 1.0
+                self._btn_actualizar.disabled = False
+                self._btn_actualizar.text = "Actualizar Ahora"
+                self.page.update()
+
+            except Exception as ex:
+                self._update_status_icon.name = ft.Icons.ERROR
+                self._update_status_icon.color = COLOR_ERROR
+                self._update_status_text.value = "Error en la actualización"
+                self._update_status_text.color = COLOR_ERROR
+                self._update_status_sub.value = str(ex)[:80]
+                self._update_progress.value = 0
+                self._btn_actualizar.disabled = False
+                self._btn_actualizar.text = "Reintentar"
+                try:
+                    self.page.update()
+                except:
+                    pass
+
+        threading.Thread(target=proceso, daemon=True).start()
 
     # =================================================================
     # VISTA: REPARAR — OPCIONES
