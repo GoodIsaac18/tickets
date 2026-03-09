@@ -6997,4 +6997,10 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    ft.run(main)
+    # establecer icono de ventana si existe
+    assets = str(Path(__file__).parent)
+    ico = Path(assets) / "icons" / "receptora.ico"
+    if ico.exists():
+        ft.run(main, assets_dir=assets, window_icon=str(ico))
+    else:
+        ft.run(main, assets_dir=assets)

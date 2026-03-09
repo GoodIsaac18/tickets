@@ -2331,17 +2331,36 @@ WshShell.Run """{python_exe}"" ""{base / py_script}""", 0, False
 
         ico = icono_path if icono_path.exists() else None
 
+        # Si llevamos icono y vamos a crear accesos en otra carpeta, copiar icono
+        # a esa carpeta para que el .lnk no pierda la referencia en caso de mover
+        # o borrar la instalación original.
+        def _prep_icon(dest_folder: Path) -> Path | None:
+            if ico is None:
+                return None
+            try:
+                dest_folder.mkdir(parents=True, exist_ok=True)
+                dest_icon = dest_folder / f"{nombre_app}.ico"
+                shutil.copy2(ico, dest_icon)
+                return dest_icon
+            except Exception:
+                return ico  # fallback a original, si falla la copia
+
         if self.opt_escritorio:
-            crear_acceso_directo_vbs(vbs_path, nombre_app, obtener_escritorio(),
-                                     f"{nombre_app} — {APP_NAME}", ico)
+            dst = obtener_escritorio()
+            ico_use = _prep_icon(dst) or ico
+            crear_acceso_directo_vbs(vbs_path, nombre_app, dst,
+                                     f"{nombre_app} — {APP_NAME}", ico_use)
         if self.opt_menu_inicio:
             carpeta = obtener_menu_inicio() / "Sistema Tickets IT"
             carpeta.mkdir(parents=True, exist_ok=True)
+            ico_use = _prep_icon(carpeta) or ico
             crear_acceso_directo_vbs(vbs_path, nombre_app, carpeta,
-                                     f"{nombre_app} — {APP_NAME}", ico)
+                                     f"{nombre_app} — {APP_NAME}", ico_use)
         if self.opt_inicio_windows:
-            crear_acceso_directo_vbs(vbs_path, nombre_app, obtener_carpeta_startup(),
-                                     f"{nombre_app} — Inicio automático", ico)
+            dst = obtener_carpeta_startup()
+            ico_use = _prep_icon(dst) or ico
+            crear_acceso_directo_vbs(vbs_path, nombre_app, dst,
+                                     f"{nombre_app} — Inicio automático", ico_use)
 
     def _configurar_firewall(self):
         """Configura reglas de Windows Firewall para el puerto 5555."""

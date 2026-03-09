@@ -3305,4 +3305,11 @@ def main(page: Page):
 
 
 if __name__ == "__main__":
-    ft.run(main)
+    # asegurarse de que el directorio de iconos esté en assets para que se copie
+    assets = str(Path(__file__).parent)
+    ico = Path(assets) / "icons" / "emisora.ico"
+    # ft.run acepta window_icon; si no existe, se ignora
+    if ico.exists():
+        ft.run(main, assets_dir=assets, window_icon=str(ico))
+    else:
+        ft.run(main, assets_dir=assets)
