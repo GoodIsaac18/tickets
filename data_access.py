@@ -1069,11 +1069,16 @@ class EscanerRed:
     """Escanea la red local. Persiste resultados en SQLite."""
 
     def __init__(self, gestor: Optional[GestorTickets] = None):
-        self._gestor   = gestor
+        # Si no se provee gestor, crear uno propio para persistir resultados
+        self._gestor = gestor if gestor is not None else GestorTickets()
         self.escaneando = False
+        # Callbacks opcionales: fn(actual, total) y fn(equipo_dict)
+        self.callback_progreso = None
+        self.callback_equipo   = None
 
     def escanear_red(self, rango_inicio: int = 1, rango_fin: int = 254,
-                     hilos: int = 50) -> List[Dict]:
+                     hilos: int = 50):
+        """Escanea la red y retorna (encontrados, cambios_ip)."""
         self.escaneando = True
         try:
             ip_local = socket.gethostbyname(socket.gethostname())
@@ -1082,19 +1087,56 @@ class EscanerRed:
             red_base = "192.168.1"
 
         ips = [f"{red_base}.{i}" for i in range(rango_inicio, rango_fin + 1)]
+        total = len(ips)
         encontrados: List[Dict] = []
+        cambios:     List[Dict] = []
+        procesados = 0
 
         with ThreadPoolExecutor(max_workers=hilos) as executor:
             futures = {executor.submit(escanear_ip, ip): ip for ip in ips}
             for future in as_completed(futures):
                 if not self.escaneando:
                     break
+                procesados += 1
+                # Notificar progreso
+                if callable(self.callback_progreso):
+                    try:
+                        self.callback_progreso(procesados, total)
+                    except Exception:
+                        pass
                 result = future.result()
                 if result:
                     encontrados.append(result)
-                    if self._gestor:
+                    # Notificar equipo encontrado
+                    if callable(self.callback_equipo):
                         try:
-                            ahora = _dt_str(datetime.now())
+                            self.callback_equipo(result)
+                        except Exception:
+                            pass
+                    # Persistir en BD y detectar cambios de IP
+                    try:
+                        ahora = _dt_str(datetime.now())
+                        ip_nueva  = result["IP_ADDRESS"]
+                        mac        = result["MAC_ADDRESS"]
+                        # Verificar si la MAC ya existía con otra IP (cambio de IP)
+                        existente = self._gestor._consultar_uno(
+                            "SELECT IP_ADDRESS, CAMBIOS_IP FROM red WHERE MAC_ADDRESS=?",
+                            (mac,)
+                        ) if mac and mac != "No detectada" else None
+                        if existente and existente["IP_ADDRESS"] != ip_nueva:
+                            # Cambio de IP detectado
+                            cambio_count = (existente["CAMBIOS_IP"] or 0) + 1
+                            result["IP_ANTERIOR"] = existente["IP_ADDRESS"]
+                            result["CAMBIOS_IP"]  = cambio_count
+                            cambios.append(result)
+                            self._gestor._ejecutar(
+                                """UPDATE red SET IP_ADDRESS=?, ESTADO_RED='Online',
+                                       ULTIMO_PING=?, CAMBIOS_IP=?
+                                   WHERE MAC_ADDRESS=?""",
+                                (ip_nueva, ahora, cambio_count, mac)
+                            )
+                        else:
+                            cambios_ip_val = result.get("CAMBIOS_IP", 0)
                             self._gestor._ejecutar(
                                 """INSERT INTO red
                                    (IP_ADDRESS, MAC_ADDRESS, HOSTNAME, ESTADO_RED,
@@ -1105,23 +1147,26 @@ class EscanerRed:
                                        HOSTNAME=excluded.HOSTNAME,
                                        ESTADO_RED='Online',
                                        ULTIMO_PING=excluded.ULTIMO_PING""",
-                                (result["IP_ADDRESS"], result["MAC_ADDRESS"],
-                                 result["HOSTNAME"], "Online",
-                                 ahora, ahora, 0, "")
+                                (ip_nueva, mac, result["HOSTNAME"],
+                                 "Online", ahora, ahora, cambios_ip_val, "")
                             )
-                        except Exception:
-                            pass
+                    except Exception as ex:
+                        print(f"[EscanerRed] Error guardando {result}: {ex}")
+
         self.escaneando = False
-        return encontrados
+        return encontrados, cambios
 
     def detener_escaneo(self):
         self.escaneando = False
 
-    def obtener_historial_red(self) -> pd.DataFrame:
-        if self._gestor is None:
-            return pd.DataFrame(columns=COLUMNAS_RED)
-        rows = self._gestor._consultar("SELECT * FROM red")
+    def obtener_equipos_red(self) -> pd.DataFrame:
+        """Retorna todos los equipos detectados en escaneos anteriores."""
+        rows = self._gestor._consultar("SELECT * FROM red ORDER BY ULTIMO_PING DESC")
         return _rows_to_df(rows, COLUMNAS_RED)
+
+    def obtener_historial_red(self) -> pd.DataFrame:
+        """Alias de obtener_equipos_red para compatibilidad."""
+        return self.obtener_equipos_red()
 
 
 # Alias de compatibilidad

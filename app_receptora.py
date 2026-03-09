@@ -5266,7 +5266,7 @@ class PanelAdminIT:
     
     def _vista_escaner_red(self) -> Column:
         """Construye la vista del escáner de red con referencias dinámicas."""
-        self.escaner = EscanerRed()
+        self.escaner = EscanerRed(gestor=self.gestor)
         
         # Obtener info rápida de red
         ip_local = obtener_ip_local()
