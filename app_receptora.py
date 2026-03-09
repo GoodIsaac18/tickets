@@ -5308,22 +5308,15 @@ class PanelAdminIT:
             border_color=COLOR_ACENTO, focused_border_color=COLOR_PRIMARIO
         )
 
-        # Progreso — siempre ocupa espacio, solo cambia visible
+        # Progreso escaneo
         self.progress_escaneo = ft.ProgressBar(
-            value=0,
-            expand=True,
-            bgcolor=COLOR_SUPERFICIE_2,
-            color=COLOR_ACENTO,
-            visible=False
+            value=0, expand=True, bgcolor=COLOR_SUPERFICIE_2, color=COLOR_ACENTO, visible=False
         )
         self.lbl_progreso = Text("", size=12, color=COLOR_TEXTO_SEC, visible=False)
-        self._btn_escanear = ft.Button(
-            "🚀 Iniciar escaneo",
-            icon=icons.RADAR,
-            on_click=self._iniciar_escaneo_red,
-            bgcolor=COLOR_PRIMARIO,
-            color=colors.WHITE
-        )
+
+        # Widget de estado de ping (inline, dentro del layout)
+        self._ping_icono = Icon(icons.WIFI_FIND, size=16, color=COLOR_INFO, visible=False)
+        self._ping_lbl   = Text("", size=12, color=COLOR_INFO, visible=False)
 
         # Labels dinámicos KPI
         self._escaner_label_online    = Text(str(online_servidor), size=32, weight=FontWeight.BOLD, color=COLOR_EXITO)
@@ -5513,19 +5506,30 @@ class PanelAdminIT:
                             Text(f"{ip_base}.", size=13, color=COLOR_TEXTO_SEC),
                             self.txt_rango_fin,
                             Container(width=6),
-                            self._btn_escanear,
+                            ft.Button(
+                                "🚀 Iniciar escaneo",
+                                icon=icons.RADAR,
+                                on_click=self._iniciar_escaneo_red,
+                                bgcolor=COLOR_PRIMARIO,
+                                color=colors.WHITE
+                            ),
                         ], spacing=8),
-                        Container(height=10),
-                        # Barra de progreso — altura fija reservada siempre
-                        Container(
-                            content=Column([
-                                Row([
+                        Container(height=8),
+                        # Barra de progreso
+                        Row([
+                            Container(
+                                content=Row([
                                     self.progress_escaneo,
                                     self.lbl_progreso,
                                 ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                            ]),
-                            height=28,
-                        ),
+                                height=24, expand=True
+                            ),
+                        ]),
+                        # Estado ping inline
+                        Row([
+                            self._ping_icono,
+                            self._ping_lbl,
+                        ], spacing=6, visible=True),
                     ]),
                     bgcolor=COLOR_SUPERFICIE,
                     padding=ft.Padding.symmetric(horizontal=16, vertical=14),
@@ -5859,23 +5863,22 @@ class PanelAdminIT:
         self.lbl_progreso.visible = True
         self.progress_escaneo.value = 0
         self.lbl_progreso.value = "Iniciando escaneo..."
-        self._btn_escanear.disabled = True
         self.page.update()
-
-        # Callbacks llamados desde el hilo de escaneo
+        
+        # Configurar callbacks
         def actualizar_progreso(actual, total):
             self.progress_escaneo.value = actual / total
-            self.lbl_progreso.value = f"Escaneando {actual}/{total} IPs..."
+            self.lbl_progreso.value = f"Escaneando: {actual}/{total} IPs..."
             try:
                 self.page.update()
-            except Exception:
+            except:
                 pass
-
+        
         def equipo_encontrado(equipo):
-            self.lbl_progreso.value = f"✓ {equipo.get('IP_ADDRESS', '')}  {equipo.get('HOSTNAME', '')}"
+            self.lbl_progreso.value = f"✓ Encontrado: {equipo['IP_ADDRESS']} - {equipo['HOSTNAME']}"
             try:
                 self.page.update()
-            except Exception:
+            except:
                 pass
         
         self.escaner.callback_progreso = actualizar_progreso
@@ -5889,7 +5892,6 @@ class PanelAdminIT:
             def actualizar_ui():
                 self.progress_escaneo.visible = False
                 self.lbl_progreso.visible = False
-                self._btn_escanear.disabled = False
 
                 try:
                     equipos_red      = self.escaner.obtener_equipos_red()
@@ -5956,27 +5958,49 @@ class PanelAdminIT:
         thread.start()
     
     def _ping_individual(self, ip: str):
-        """Hace ping a una IP individual (thread-safe)."""
+        """Hace ping a una IP y muestra el resultado en el panel inline."""
         from data_access import ping_host
+        import time
 
-        # Mostrar estado inicial
-        self._mostrar_snackbar(f"🔍 Haciendo ping a {ip}...", COLOR_INFO)
+        # Mostrar estado "en progreso" inmediatamente (hilo principal)
+        self._ping_icono.name    = icons.PENDING
+        self._ping_icono.color   = COLOR_INFO
+        self._ping_icono.visible = True
+        self._ping_lbl.value     = f"Haciendo ping a {ip}..."
+        self._ping_lbl.color     = COLOR_INFO
+        self._ping_lbl.visible   = True
+        self.page.update()
 
         def hacer_ping():
             try:
                 resultado = ping_host(ip, timeout=2)
-                msg   = f"✅ {ip} está Online" if resultado else f"❌ {ip} no responde"
-                color = COLOR_EXITO if resultado else COLOR_ERROR
+                if resultado:
+                    self._ping_icono.name  = icons.CHECK_CIRCLE
+                    self._ping_icono.color = COLOR_EXITO
+                    self._ping_lbl.value   = f"✅  {ip}  está Online"
+                    self._ping_lbl.color   = COLOR_EXITO
+                else:
+                    self._ping_icono.name  = icons.CANCEL
+                    self._ping_icono.color = COLOR_ERROR
+                    self._ping_lbl.value   = f"❌  {ip}  no responde"
+                    self._ping_lbl.color   = COLOR_ERROR
             except Exception as ex:
-                msg   = f"❌ Error al hacer ping a {ip}: {ex}"
-                color = COLOR_ERROR
-
-            # Actualizar UI de forma segura desde el hilo
-            def _actualizar():
-                self._mostrar_snackbar(msg, color)
+                self._ping_icono.name  = icons.ERROR
+                self._ping_icono.color = COLOR_ERROR
+                self._ping_lbl.value   = f"❌  Error: {ex}"
+                self._ping_lbl.color   = COLOR_ERROR
 
             try:
-                _actualizar()
+                self.page.update()
+            except Exception:
+                pass
+
+            # Ocultar resultado tras 6 segundos
+            time.sleep(6)
+            self._ping_icono.visible = False
+            self._ping_lbl.visible   = False
+            try:
+                self.page.update()
             except Exception:
                 pass
 
