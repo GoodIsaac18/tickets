@@ -1189,6 +1189,18 @@ class EscanerRed:
         """Alias de obtener_equipos_red para compatibilidad."""
         return self.obtener_equipos_red()
 
+    def descartar_cambios_ip(self, mac: str) -> bool:
+        """Resetea el contador de cambios de IP para un equipo (descarta la alerta)."""
+        try:
+            self._gestor._ejecutar(
+                "UPDATE red SET CAMBIOS_IP=0, IP_ANTERIOR=NULL WHERE MAC_ADDRESS=?",
+                (mac,)
+            )
+            return True
+        except Exception as ex:
+            print(f"[EscanerRed] Error descartando cambios IP de {mac}: {ex}")
+            return False
+
 
 # Alias de compatibilidad
 GestorRed = EscanerRed

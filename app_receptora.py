@@ -5266,6 +5266,15 @@ class PanelAdminIT:
     # VISTA: ESCÁNER DE RED
     # =========================================================================
     
+    @staticmethod
+    def _wrap_tabla_scroll(tabla_widget, height_px: int):
+        """Envuelve un DataTable en Column+Row para scroll vertical y horizontal."""
+        return Column(
+            controls=[Row([tabla_widget], scroll=ScrollMode.AUTO)],
+            scroll=ScrollMode.AUTO,
+            height=height_px,
+        )
+
     def _vista_escaner_red(self) -> Column:
         """Construye la vista del escáner de red con referencias dinámicas."""
         self.escaner = EscanerRed(gestor=self.gestor)
@@ -5317,10 +5326,11 @@ class PanelAdminIT:
         self.tabla_red   = self._construir_tabla_red(equipos_red)
         alertas_cambios  = self._construir_alertas_cambios(equipos_red)
 
-        # Contenedor de equipos conectados con scroll horizontal
+        # Contenedor de equipos conectados — scroll horizontal (Row) + vertical (Column)
         self._escaner_tabla_conectados = Container(
             content=(
-                Row([tabla_conectados], scroll=ScrollMode.AUTO)
+                self._wrap_tabla_scroll(tabla_conectados,
+                                        min(len(equipos_servidor) * 56 + 56, 360))
                 if equipos_servidor
                 else Container(
                     content=Column([
@@ -5332,22 +5342,20 @@ class PanelAdminIT:
                     padding=30
                 )
             ),
-            height=min(len(equipos_servidor) * 54 + 52, 360) if equipos_servidor else None,
             bgcolor=COLOR_SUPERFICIE,
             border_radius=10,
             border=ft.Border.all(1, COLOR_SUPERFICIE_2),
-            padding=ft.Padding.all(0) if equipos_servidor else ft.Padding.all(10),
-            clip_behavior=ft.ClipBehavior.HARD_EDGE
         )
 
-        # Contenedor de historial con scroll horizontal
+        # Contenedor de historial — scroll horizontal + vertical
         self._escaner_tabla_red = Container(
-            content=Row([self.tabla_red], scroll=ScrollMode.AUTO),
-            height=min(len(equipos_red) * 54 + 52, 480) if not equipos_red.empty else 120,
+            content=self._wrap_tabla_scroll(
+                self.tabla_red,
+                min(len(equipos_red) * 56 + 56, 460) if not equipos_red.empty else 120
+            ),
             bgcolor=COLOR_SUPERFICIE,
             border_radius=10,
             border=ft.Border.all(1, COLOR_SUPERFICIE_2),
-            clip_behavior=ft.ClipBehavior.HARD_EDGE
         )
 
         self._escaner_alertas = Container(
@@ -5642,44 +5650,87 @@ class PanelAdminIT:
         self._mostrar_snackbar(f"✅ {online} equipos online de {len(equipos)} registrados", COLOR_EXITO)
         self._refrescar_vista()
     
+    def _descartar_alerta_cambio_ip(self, mac: str):
+        """Descarta la alerta de cambio de IP reseteando el contador en BD."""
+        try:
+            self.escaner.descartar_cambios_ip(mac)
+            self._mostrar_snackbar(f"✅ Alerta descartada para {mac}", COLOR_EXITO)
+            # Refrescar solo el panel de alertas
+            try:
+                equipos_red = self.escaner.obtener_equipos_red()
+                alertas_nueva = self._construir_alertas_cambios(equipos_red)
+                cambios_count = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
+                self._escaner_alertas.content = alertas_nueva if cambios_count > 0 else Container()
+                self._escaner_label_cambios.value = str(cambios_count)
+                self._escaner_label_cambios.color = COLOR_ADVERTENCIA if cambios_count else COLOR_TEXTO_SEC
+                self.page.update()
+            except Exception as ex:
+                print(f"[ERROR] Refrescando alertas: {ex}")
+        except Exception as ex:
+            self._mostrar_snackbar(f"❌ Error: {ex}", COLOR_ERROR)
+
     def _construir_alertas_cambios(self, equipos_red: pd.DataFrame) -> Container:
-        """Construye el panel de alertas de cambios de IP."""
+        """Construye el panel de alertas de cambios de IP (descartables)."""
         if equipos_red.empty or "CAMBIOS_IP" not in equipos_red.columns:
             return Container()
-        
+
         cambios = equipos_red[equipos_red["CAMBIOS_IP"] > 0]
         if cambios.empty:
             return Container()
-        
+
         alertas = []
         for _, equipo in cambios.iterrows():
+            mac      = equipo.get("MAC_ADDRESS", "")
+            hostname = equipo.get("HOSTNAME", "Equipo")
+            ip_ant   = equipo.get("IP_ANTERIOR", "?") or "?"
+            ip_nueva = equipo.get("IP_ADDRESS", "?")
+            n_cambios = int(equipo.get("CAMBIOS_IP", 0))
+
             alertas.append(
                 Container(
                     content=Row([
-                        Icon(icons.WARNING_AMBER, color=COLOR_ADVERTENCIA),
+                        Container(
+                            content=Icon(icons.WARNING_AMBER, size=22, color=colors.WHITE),
+                            bgcolor=COLOR_ADVERTENCIA, padding=10, border_radius=8
+                        ),
                         Column([
-                            Text(f"⚠️ {equipo.get('HOSTNAME', 'Equipo')} cambió de IP", 
-                                 weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA),
-                            Text(f"IP anterior: {equipo.get('IP_ANTERIOR', '?')} → Nueva: {equipo.get('IP_ADDRESS', '?')}", 
+                            Text(f"{hostname} cambió de IP",
+                                 weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA, size=14),
+                            Text(f"Anterior: {ip_ant}  →  Nueva: {ip_nueva}",
                                  size=12, color=COLOR_TEXTO_SEC),
-                            Text(f"MAC: {equipo.get('MAC_ADDRESS', '?')} | Cambios totales: {equipo.get('CAMBIOS_IP', 0)}", 
+                            Text(f"MAC: {mac}  |  Cambios acumulados: {n_cambios}",
                                  size=11, color=COLOR_TEXTO_SEC),
                         ], spacing=2, expand=True),
-                    ], spacing=10),
+                        ft.IconButton(
+                            icon=icons.CLOSE,
+                            icon_color=COLOR_TEXTO_SEC,
+                            icon_size=20,
+                            tooltip="Descartar alerta",
+                            on_click=lambda e, m=mac: self._descartar_alerta_cambio_ip(m)
+                        ),
+                    ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     bgcolor="#3D2607",
-                    padding=10,
-                    border_radius=8,
+                    padding=ft.Padding.symmetric(horizontal=12, vertical=10),
+                    border_radius=10,
                     border=ft.Border.all(1, COLOR_ADVERTENCIA)
                 )
             )
-        
+
         return Container(
             content=Column([
-                Text("⚠️ Alertas de Cambios de IP", weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA),
-                Container(height=5),
+                Row([
+                    Icon(icons.WARNING_AMBER, color=COLOR_ADVERTENCIA, size=18),
+                    Text(f"Alertas de Cambios de IP ({len(alertas)})",
+                         weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA),
+                ], spacing=8),
+                Container(height=6),
                 *alertas
-            ], spacing=5),
-            margin=ft.Margin.only(bottom=15)
+            ], spacing=6),
+            bgcolor=COLOR_SUPERFICIE,
+            padding=ft.Padding.symmetric(horizontal=14, vertical=12),
+            border_radius=12,
+            border=ft.Border.all(1, COLOR_ADVERTENCIA + "80"),
+            margin=ft.Margin.only(bottom=14)
         )
     
     def _construir_tabla_red(self, equipos: pd.DataFrame) -> DataTable:
@@ -5829,21 +5880,19 @@ class PanelAdminIT:
                     equipos_servidor = obtener_equipos_con_estado()
                     equipos_online   = obtener_equipos_online()
 
-                    # Reconstruir tabla de historial (scroll horizontal)
+                    # Reconstruir historial con scroll real
                     tabla_red_nueva = self._construir_tabla_red(equipos_red)
-                    self._escaner_tabla_red.content = Row([tabla_red_nueva], scroll=ScrollMode.AUTO)
-                    self._escaner_tabla_red.height  = (
-                        min(len(equipos_red) * 54 + 52, 480) if not equipos_red.empty else 120
+                    self._escaner_tabla_red.content = self._wrap_tabla_scroll(
+                        tabla_red_nueva,
+                        min(len(equipos_red) * 56 + 56, 460) if not equipos_red.empty else 120
                     )
 
-                    # Reconstruir tabla de conectados (scroll horizontal)
+                    # Reconstruir conectados con scroll real
                     tabla_conectados_nueva = self._construir_tabla_equipos_conectados(equipos_servidor)
                     if equipos_servidor:
-                        self._escaner_tabla_conectados.content = Row(
-                            [tabla_conectados_nueva], scroll=ScrollMode.AUTO
-                        )
-                        self._escaner_tabla_conectados.height = min(
-                            len(equipos_servidor) * 54 + 52, 360
+                        self._escaner_tabla_conectados.content = self._wrap_tabla_scroll(
+                            tabla_conectados_nueva,
+                            min(len(equipos_servidor) * 56 + 56, 360)
                         )
                     else:
                         self._escaner_tabla_conectados.content = Container(
@@ -5853,7 +5902,6 @@ class PanelAdminIT:
                             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8),
                             padding=30
                         )
-                        self._escaner_tabla_conectados.height = None
 
                     # Alertas
                     cambios_count = (
@@ -5892,21 +5940,31 @@ class PanelAdminIT:
         thread.start()
     
     def _ping_individual(self, ip: str):
-        """Hace ping a una IP individual."""
+        """Hace ping a una IP individual (thread-safe)."""
         from data_access import ping_host
-        
+
+        # Mostrar estado inicial
         self._mostrar_snackbar(f"🔍 Haciendo ping a {ip}...", COLOR_INFO)
-        
+
         def hacer_ping():
-            resultado = ping_host(ip, timeout=2)
-            if resultado:
-                self._mostrar_snackbar(f"✅ {ip} está Online", COLOR_EXITO)
-            else:
-                self._mostrar_snackbar(f"❌ {ip} no responde", COLOR_ERROR)
-            self.page.update()
-        
-        thread = threading.Thread(target=hacer_ping, daemon=True)
-        thread.start()
+            try:
+                resultado = ping_host(ip, timeout=2)
+                msg   = f"✅ {ip} está Online" if resultado else f"❌ {ip} no responde"
+                color = COLOR_EXITO if resultado else COLOR_ERROR
+            except Exception as ex:
+                msg   = f"❌ Error al hacer ping a {ip}: {ex}"
+                color = COLOR_ERROR
+
+            # Actualizar UI de forma segura desde el hilo
+            def _actualizar():
+                self._mostrar_snackbar(msg, color)
+
+            try:
+                _actualizar()
+            except Exception:
+                pass
+
+        threading.Thread(target=hacer_ping, daemon=True).start()
     
     def _agregar_a_inventario(self, mac: str, hostname: str, ip: str):
         """Agrega un equipo de red al inventario."""
