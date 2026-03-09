@@ -6506,4 +6506,24 @@ def main(page: Page):
 
 
 if __name__ == "__main__":
+    import asyncio
+
+    def _suprimir_errores_conexion(loop, context):
+        """
+        Silencia errores de desconexión brusca de clientes (WinError 10054).
+        En Windows el ProactorEventLoop lanza ConnectionResetError cuando un
+        cliente cierra la conexión abruptamente — es comportamiento normal.
+        """
+        excepcion = context.get("exception")
+        if isinstance(excepcion, (ConnectionResetError, BrokenPipeError, ConnectionAbortedError)):
+            return  # ignorar — desconexiones normales de emisoras
+        # Cualquier otro error → comportamiento predeterminado
+        loop.default_exception_handler(context)
+
+    try:
+        loop = asyncio.get_event_loop()
+        loop.set_exception_handler(_suprimir_errores_conexion)
+    except Exception:
+        pass
+
     ft.run(main)
