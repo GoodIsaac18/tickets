@@ -1011,6 +1011,27 @@ def obtener_mac_address() -> str:
         return "00:00:00:00:00:00"
 
 
+def obtener_usuario_ad() -> str:
+    """Obtiene el nombre de usuario del sistema (Windows AD / local)."""
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        try:
+            import os
+            return os.environ.get("USERNAME", os.environ.get("USER", "usuario"))
+        except Exception:
+            return "usuario"
+
+
+def obtener_hostname() -> str:
+    """Obtiene el nombre del equipo (hostname)."""
+    try:
+        return socket.gethostname()
+    except Exception:
+        return "equipo"
+
+
 def ping_host(ip: str, timeout: int = 1) -> bool:
     try:
         result = subprocess.run(
