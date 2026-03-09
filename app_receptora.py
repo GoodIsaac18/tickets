@@ -1740,12 +1740,14 @@ class PanelAdminIT:
                 telefono=txt_telefono.value or "",
                 email=txt_email.value or ""
             )
-            self.page.close(dialogo)
+            dialogo.open = False
+            self.page.update()
             self._mostrar_snackbar(f"✓ Técnico {txt_nombre.value} agregado", COLOR_EXITO)
             self._refrescar_vista()
         
         def cerrar_dialogo(e):
-            self.page.close(dialogo)
+            dialogo.open = False
+            self.page.update()
         
         dialogo = AlertDialog(
             modal=True,
@@ -1788,7 +1790,7 @@ class PanelAdminIT:
             shape=ft.RoundedRectangleBorder(radius=16),
         )
         
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _tarjeta_tecnico(self, tec: pd.Series) -> Container:
         """Crea una tarjeta para un técnico."""
@@ -1892,7 +1894,8 @@ class PanelAdminIT:
         
         def cerrar_y_eliminar(e):
             # Primero cerrar el diálogo
-            self.page.close(dialogo)
+            dialogo.open = False
+            self.page.update()
             self._mostrar_carga("Eliminando técnico...")
             
             if self.gestor.eliminar_tecnico(id_tecnico):
@@ -1910,7 +1913,8 @@ class PanelAdminIT:
             self._refrescar_vista()
         
         def solo_cerrar(e):
-            self.page.close(dialogo)
+            dialogo.open = False
+            self.page.update()
         
         # Diálogo profesional de confirmación
         dialogo = AlertDialog(
@@ -1969,7 +1973,7 @@ class PanelAdminIT:
             actions_alignment=MainAxisAlignment.END
         )
         
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _cambiar_estado_tecnico(self, id_tecnico: str, nuevo_estado: str):
         """Cambia el estado de un técnico."""
@@ -2014,7 +2018,8 @@ class PanelAdminIT:
         def cerrar_dialogo(e=None):
             nonlocal dialogo
             if dialogo:
-                self.page.close(dialogo)
+                dialogo.open = False
+                self.page.update()
         
         def asignar(e):
             if dd_tickets.value:
@@ -2085,7 +2090,7 @@ class PanelAdminIT:
             actions_alignment=MainAxisAlignment.END
         )
         
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     # =========================================================================
     # VISTA: TICKETS
@@ -2962,7 +2967,7 @@ class PanelAdminIT:
             actions_alignment=MainAxisAlignment.END
         )
         
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     # =========================================================================
     # VISTA: REPORTES Y ESTADÍSTICAS AVANZADAS
@@ -3949,7 +3954,8 @@ class PanelAdminIT:
         def cerrar_dialogo(e=None):
             nonlocal dialogo
             if dialogo:
-                self.page.close(dialogo)
+                dialogo.open = False
+                self.page.update()
         
         def guardar_cambios(e):
             try:
@@ -4085,7 +4091,7 @@ class PanelAdminIT:
             actions_alignment=MainAxisAlignment.END
         )
         
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _ir_a_tickets(self):
         """Navega a la vista de tickets."""
@@ -4152,7 +4158,8 @@ class PanelAdminIT:
         
         def cerrar_dialogo(e=None):
             if dialogo_ref[0]:
-                self.page.close(dialogo_ref[0])
+                dialogo_ref[0].open = False
+                self.page.update()
         
         # Icono animado
         icono_container = Container(
@@ -4248,7 +4255,7 @@ class PanelAdminIT:
             mensaje=mensaje,
             boton_texto="Aceptar"
         )
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _mostrar_error(self, mensaje: str, titulo: str = "¡Error!"):
         """Muestra un diálogo de error."""
@@ -4258,7 +4265,7 @@ class PanelAdminIT:
             mensaje=mensaje,
             boton_texto="Entendido"
         )
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _mostrar_advertencia(self, mensaje: str, titulo: str = "Atención"):
         """Muestra un diálogo de advertencia."""
@@ -4268,7 +4275,7 @@ class PanelAdminIT:
             mensaje=mensaje,
             boton_texto="Entendido"
         )
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _mostrar_info(self, mensaje: str, titulo: str = "Información"):
         """Muestra un diálogo informativo."""
@@ -4278,7 +4285,7 @@ class PanelAdminIT:
             mensaje=mensaje,
             boton_texto="OK"
         )
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _mostrar_confirmacion(self, mensaje: str, titulo: str = "Confirmar",
                                on_confirmar=None, on_cancelar=None):
@@ -4293,14 +4300,15 @@ class PanelAdminIT:
             boton_cancelar_texto="Cancelar",
             boton_cancelar_accion=on_cancelar
         )
-        self.page.open(dialogo)
+        self.page.show_dialog(dialogo)
     
     def _cerrar_dialogo(self, e=None) -> None:
         """Cierra el diálogo activo."""
         if self.page.overlay:
             dialogo = self.page.overlay[-1]
             if isinstance(dialogo, AlertDialog):
-                self.page.close(dialogo)
+                dialogo.open = False
+                self.page.update()
     
     # =========================================================================
     # SISTEMA DE OVERLAY DE CARGA
@@ -4896,7 +4904,8 @@ class PanelAdminIT:
             def cerrar_dialogo(e=None):
                 nonlocal dlg
                 if dlg:
-                    self.page.close(dlg)
+                    dlg.open = False
+                    self.page.update()
             
             def guardar_equipo(e=None):
                 try:
@@ -5025,7 +5034,7 @@ class PanelAdminIT:
                 ]
             )
             
-            self.page.open(dlg)
+            self.page.show_dialog(dlg)
         except Exception as ex:
             self._mostrar_error("Error", str(ex))
             traceback.print_exc()
@@ -5082,7 +5091,8 @@ class PanelAdminIT:
         def cerrar_dialogo(e=None):
             nonlocal dlg
             if dlg:
-                self.page.close(dlg)
+                dlg.open = False
+                self.page.update()
         
         def agregar_equipo(e):
             if not txt_mac.value:
@@ -5177,7 +5187,7 @@ class PanelAdminIT:
             ]
         )
         
-        self.page.open(dlg)
+        self.page.show_dialog(dlg)
     
     def _confirmar_eliminar_equipo(self, mac_address: str):
         """Muestra confirmación para eliminar un equipo."""
@@ -5186,7 +5196,8 @@ class PanelAdminIT:
         def cerrar_dialogo(e=None):
             nonlocal dlg
             if dlg:
-                self.page.close(dlg)
+                dlg.open = False
+                self.page.update()
         
         def eliminar(e):
             cerrar_dialogo()
@@ -5249,7 +5260,7 @@ class PanelAdminIT:
             ]
         )
         
-        self.page.open(dlg)
+        self.page.show_dialog(dlg)
     
     # =========================================================================
     # VISTA: ESCÁNER DE RED
@@ -6073,7 +6084,8 @@ class PanelAdminIT:
         )
         
         def cerrar_dialogo(e=None):
-            self.page.close(dlg)
+            dlg.open = False
+            self.page.update()
         
         def confirmar_rechazo(e):
             from servidor_red import rechazar_solicitud_enlace
@@ -6081,7 +6093,8 @@ class PanelAdminIT:
             
             if rechazar_solicitud_enlace(mac, motivo):
                 self._mostrar_snackbar(f"❌ Solicitud de {mac} rechazada", COLOR_ADVERTENCIA)
-                self.page.close(dlg)
+                dlg.open = False
+                self.page.update()
                 self._refrescar_vista()
             else:
                 self._mostrar_snackbar("❌ Error al rechazar", COLOR_ERROR)
@@ -6109,20 +6122,22 @@ class PanelAdminIT:
             ]
         )
         
-        self.page.open(dlg)
+        self.page.show_dialog(dlg)
     
     def _confirmar_revocar_enlace(self, mac: str):
         """Confirma la revocación de un enlace."""
         
         def cerrar_dialogo(e=None):
-            self.page.close(dlg)
+            dlg.open = False
+            self.page.update()
         
         def revocar(e):
             from servidor_red import revocar_enlace
             
             if revocar_enlace(mac):
                 self._mostrar_snackbar(f"🔗 Enlace de {mac} revocado", COLOR_ADVERTENCIA)
-                self.page.close(dlg)
+                dlg.open = False
+                self.page.update()
                 self._refrescar_vista()
             else:
                 self._mostrar_snackbar("❌ Error al revocar enlace", COLOR_ERROR)
@@ -6143,7 +6158,7 @@ class PanelAdminIT:
             ]
         )
         
-        self.page.open(dlg)
+        self.page.show_dialog(dlg)
 
 
 # =============================================================================
