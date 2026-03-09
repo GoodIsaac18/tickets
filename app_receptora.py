@@ -5270,7 +5270,7 @@ class PanelAdminIT:
         
         # Obtener info rápida de red
         ip_local = obtener_ip_local()
-        ip_base, _, _ = obtener_rango_red()
+        ip_base = ".".join(ip_local.split(".")[:3])  # ej: "192.168.1"
         servidor_activo = servidor_esta_activo()
         
         # Cargar datos (optimizado - solo lo necesario)
