@@ -325,10 +325,17 @@ class InstaladorGrafico:
         self.page.title = f"Instalador — {APP_NAME}"
         self.page.bgcolor = COLOR_FONDO
         self.page.padding = 0
+        # tamaño sugerido; permitirá redimensionar para pantallas pequeñas
         self.page.window.width = 920
         self.page.window.height = 700
         self.page.theme_mode = ft.ThemeMode.DARK
-        self.page.window.resizable = False
+        self.page.window.resizable = True
+        # límites mínimos razonables para que la UI no se rompa
+        try:
+            self.page.window.min_width = 600
+            self.page.window.min_height = 500
+        except Exception:
+            pass
 
     # =================================================================
     # NAVEGACIÓN PRINCIPAL
