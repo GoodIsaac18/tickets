@@ -5308,11 +5308,22 @@ class PanelAdminIT:
             border_color=COLOR_ACENTO, focused_border_color=COLOR_PRIMARIO
         )
 
-        # Progreso
+        # Progreso — siempre ocupa espacio, solo cambia visible
         self.progress_escaneo = ft.ProgressBar(
-            value=0, bgcolor=COLOR_SUPERFICIE_2, color=COLOR_ACENTO, visible=False
+            value=0,
+            expand=True,
+            bgcolor=COLOR_SUPERFICIE_2,
+            color=COLOR_ACENTO,
+            visible=False
         )
         self.lbl_progreso = Text("", size=12, color=COLOR_TEXTO_SEC, visible=False)
+        self._btn_escanear = ft.Button(
+            "🚀 Iniciar escaneo",
+            icon=icons.RADAR,
+            on_click=self._iniciar_escaneo_red,
+            bgcolor=COLOR_PRIMARIO,
+            color=colors.WHITE
+        )
 
         # Labels dinámicos KPI
         self._escaner_label_online    = Text(str(online_servidor), size=32, weight=FontWeight.BOLD, color=COLOR_EXITO)
@@ -5502,16 +5513,19 @@ class PanelAdminIT:
                             Text(f"{ip_base}.", size=13, color=COLOR_TEXTO_SEC),
                             self.txt_rango_fin,
                             Container(width=6),
-                            ft.Button(
-                                "🚀 Iniciar escaneo",
-                                icon=icons.RADAR,
-                                on_click=self._iniciar_escaneo_red,
-                                bgcolor=COLOR_PRIMARIO,
-                                color=colors.WHITE
-                            ),
+                            self._btn_escanear,
                         ], spacing=8),
-                        Container(height=8),
-                        Row([self.progress_escaneo, self.lbl_progreso], spacing=10),
+                        Container(height=10),
+                        # Barra de progreso — altura fija reservada siempre
+                        Container(
+                            content=Column([
+                                Row([
+                                    self.progress_escaneo,
+                                    self.lbl_progreso,
+                                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                            ]),
+                            height=28,
+                        ),
                     ]),
                     bgcolor=COLOR_SUPERFICIE,
                     padding=ft.Padding.symmetric(horizontal=16, vertical=14),
@@ -5845,22 +5859,23 @@ class PanelAdminIT:
         self.lbl_progreso.visible = True
         self.progress_escaneo.value = 0
         self.lbl_progreso.value = "Iniciando escaneo..."
+        self._btn_escanear.disabled = True
         self.page.update()
-        
-        # Configurar callbacks
+
+        # Callbacks llamados desde el hilo de escaneo
         def actualizar_progreso(actual, total):
             self.progress_escaneo.value = actual / total
-            self.lbl_progreso.value = f"Escaneando: {actual}/{total} IPs..."
+            self.lbl_progreso.value = f"Escaneando {actual}/{total} IPs..."
             try:
                 self.page.update()
-            except:
+            except Exception:
                 pass
-        
+
         def equipo_encontrado(equipo):
-            self.lbl_progreso.value = f"✓ Encontrado: {equipo['IP_ADDRESS']} - {equipo['HOSTNAME']}"
+            self.lbl_progreso.value = f"✓ {equipo.get('IP_ADDRESS', '')}  {equipo.get('HOSTNAME', '')}"
             try:
                 self.page.update()
-            except:
+            except Exception:
                 pass
         
         self.escaner.callback_progreso = actualizar_progreso
@@ -5874,6 +5889,7 @@ class PanelAdminIT:
             def actualizar_ui():
                 self.progress_escaneo.visible = False
                 self.lbl_progreso.visible = False
+                self._btn_escanear.disabled = False
 
                 try:
                     equipos_red      = self.escaner.obtener_equipos_red()
