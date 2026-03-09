@@ -5962,14 +5962,18 @@ class PanelAdminIT:
         from data_access import ping_host
         import time
 
-        # Mostrar estado "en progreso" inmediatamente (hilo principal)
-        self._ping_icono.name    = icons.PENDING
-        self._ping_icono.color   = COLOR_INFO
-        self._ping_icono.visible = True
-        self._ping_lbl.value     = f"Haciendo ping a {ip}..."
-        self._ping_lbl.color     = COLOR_INFO
-        self._ping_lbl.visible   = True
-        self.page.update()
+        try:
+            # Mostrar estado "en progreso" inmediatamente (hilo principal)
+            self._ping_icono.name    = icons.AUTORENEW
+            self._ping_icono.color   = COLOR_INFO
+            self._ping_icono.visible = True
+            self._ping_lbl.value     = f"Haciendo ping a {ip}..."
+            self._ping_lbl.color     = COLOR_INFO
+            self._ping_lbl.visible   = True
+            self.page.update()
+        except Exception as ex:
+            print(f"[PING] Error actualizando estado inicial: {ex}")
+            return
 
         def hacer_ping():
             try:
@@ -6009,14 +6013,19 @@ class PanelAdminIT:
     def _agregar_a_inventario(self, mac: str, hostname: str, ip: str):
         """Agrega un equipo de red al inventario."""
         if not mac or mac == "No detectada" or mac == "-":
-            self._mostrar_snackbar("❌ No se puede agregar sin dirección MAC válida", COLOR_ERROR)
+            self._mostrar_error("MAC inválida", "No se puede agregar un equipo sin dirección MAC válida.")
             return
         
         try:
             # Verificar si ya existe
             equipo_existente = self.gestor.obtener_equipo_por_mac(mac)
             if equipo_existente:
-                self._mostrar_snackbar(f"⚠️ El equipo {mac} ya está en el inventario", COLOR_ADVERTENCIA)
+                # Ya existe → ofrecer editar directamente
+                self._mostrar_confirmacion(
+                    mensaje=f"El equipo con MAC {mac} ya está en el inventario.\n¿Deseas editar sus datos?",
+                    titulo="Equipo ya registrado",
+                    on_confirmar=lambda e=None: self._dialogo_editar_equipo(mac)
+                )
                 return
             
             # Registrar en inventario
@@ -6027,16 +6036,15 @@ class PanelAdminIT:
             )
             
             if resultado:
-                self._mostrar_snackbar(f"✅ {hostname or mac} agregado. Completa los datos del equipo.", COLOR_EXITO)
                 print(f"[INVENTARIO] Equipo agregado: MAC={mac}, Hostname={hostname}, IP={ip}")
                 # Abrir diálogo de edición para completar datos
                 self._dialogo_editar_equipo(mac)
             else:
-                self._mostrar_snackbar("❌ Error al guardar el equipo", COLOR_ERROR)
+                self._mostrar_error("Error al guardar", "No se pudo guardar el equipo en el inventario.")
                 
         except Exception as e:
             print(f"[ERROR] Error agregando equipo: {e}")
-            self._mostrar_snackbar(f"❌ Error: {str(e)}", COLOR_ERROR)
+            self._mostrar_error("Error inesperado", str(e))
     
     # =========================================================================
     # VISTA: SOLICITUDES DE ENLACE
