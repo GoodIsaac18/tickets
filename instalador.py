@@ -357,6 +357,7 @@ class InstaladorGrafico:
                 content=contenido,
                 expand=True,
                 padding=30 if not es_menu else 0,
+                scroll=ft.ScrollMode.AUTO,
             )
         )
 
@@ -2320,16 +2321,28 @@ WshShell.Run """{python_exe}"" ""{base / py_script}""", 0, False
     def _crear_accesos_directos(self):
         """Crea accesos directos según las opciones seleccionadas."""
         base = Path(self.directorio_destino)
+        # escoger launcher y nombre según tipo
         if self.tipo_instalacion == "emisora":
             nombre_app = APP_NAME_EMISORA
             vbs_path = base / "launcher_emisora.vbs"
-            icono_path = base / "icons" / "emisora.ico"
+            buscado = "emisora"
         else:
             nombre_app = APP_NAME_RECEPTORA
             vbs_path = base / "launcher_receptora.vbs"
-            icono_path = base / "icons" / "receptora.ico"
+            buscado = "receptora"
 
-        ico = icono_path if icono_path.exists() else None
+        # buscar icono en carpeta icons (cualquier nombre que incluya el texto)
+        ico = None
+        icon_dir = base / "icons"
+        if icon_dir.exists():
+            # priorizar coincidencias con buscado
+            matches = list(icon_dir.glob(f"*{buscado}*.ico"))
+            if matches:
+                ico = matches[0]
+            else:
+                anyico = list(icon_dir.glob("*.ico"))
+                if anyico:
+                    ico = anyico[0]
 
         # Si llevamos icono y vamos a crear accesos en otra carpeta, copiar icono
         # a esa carpeta para que el .lnk no pierda la referencia en caso de mover
