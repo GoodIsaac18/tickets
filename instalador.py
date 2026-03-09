@@ -150,13 +150,35 @@ Sistema de Tickets IT v3.0 — Soporte Técnico Profesional"""
 # =============================================================================
 
 def obtener_escritorio():
-    return Path(os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"))
+    """Devuelve la ruta real del escritorio del usuario.
+
+    En Windows la carpeta puede llamarse "Desktop", "Escritorio",
+    etc. usar la API COM de WScript.Shell garantiza el nombre correcto
+    según idioma y cuenta actual. Si la importación falla, se cae a un
+    fallback simple.
+    """
+    try:
+        from win32com.client import Dispatch
+        shell = Dispatch("WScript.Shell")
+        return Path(shell.SpecialFolders("Desktop"))
+    except Exception:
+        # fallback tradicional
+        return Path(os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"))
+
 
 def obtener_menu_inicio():
-    return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs"))
+    """Devuelve la carpeta "Start Menu\Programs" correcta."""
+    try:
+        from win32com.client import Dispatch
+        shell = Dispatch("WScript.Shell")
+        # SpecialFolders("StartMenu") apunta a …\Start Menu; agregamos Programs
+        return Path(shell.SpecialFolders("StartMenu")) / "Programs"
+    except Exception:
+        return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs"))
+
 
 def obtener_carpeta_startup():
-    return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup"))
+    return obtener_menu_inicio() / "Startup"
 
 def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
                              descripcion: str = "", icono_path: Path = None):
