@@ -5840,145 +5840,202 @@ class PanelAdminIT:
     def _vista_solicitudes(self) -> Column:
         """Construye la vista de solicitudes de enlace pendientes."""
         from servidor_red import obtener_solicitudes_pendientes, obtener_equipos_aprobados
-        
+
         solicitudes = obtener_solicitudes_pendientes()
-        aprobados = obtener_equipos_aprobados()
-        
+        aprobados   = obtener_equipos_aprobados()
+
+        # ── Header ────────────────────────────────────────────────────────────
+        header = Container(
+            content=Row([
+                Container(
+                    content=Icon(icons.NOTIFICATIONS_ACTIVE, size=36, color=colors.WHITE),
+                    bgcolor=COLOR_ACENTO, padding=14, border_radius=12
+                ),
+                Column([
+                    Text("Solicitudes de Enlace", size=22, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    Text("Gestiona los equipos que solicitan acceso al sistema de tickets",
+                         size=13, color=COLOR_TEXTO_SEC),
+                ], spacing=3, expand=True),
+                ft.Button(
+                    "🔄 Actualizar",
+                    icon=icons.REFRESH,
+                    on_click=lambda e: self._refrescar_vista()
+                ),
+            ], spacing=16, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            bgcolor=COLOR_SUPERFICIE,
+            padding=ft.Padding.symmetric(horizontal=20, vertical=16),
+            border_radius=14,
+            border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+        )
+
+        # ── Tarjetas de stats ─────────────────────────────────────────────────
+        def _stat_card(icono, valor, etiqueta, color_icono, borde_color=None):
+            return Container(
+                content=Row([
+                    Container(
+                        content=Icon(icono, size=26, color=colors.WHITE),
+                        bgcolor=color_icono, padding=10, border_radius=10
+                    ),
+                    Column([
+                        Text(str(valor), size=26, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text(etiqueta, size=11, color=COLOR_TEXTO_SEC),
+                    ], spacing=1),
+                ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                bgcolor=COLOR_SUPERFICIE,
+                padding=ft.Padding.symmetric(horizontal=18, vertical=14),
+                border_radius=12,
+                border=ft.Border.all(2 if borde_color else 1,
+                                     borde_color if borde_color else COLOR_SUPERFICIE_2),
+                expand=True
+            )
+
+        stats_row = Row([
+            _stat_card(icons.PENDING_ACTIONS, len(solicitudes), "Pendientes",
+                       COLOR_ADVERTENCIA, COLOR_ADVERTENCIA if solicitudes else None),
+            _stat_card(icons.LINK, len(aprobados), "Enlazados", COLOR_EXITO),
+            _stat_card(icons.DEVICES, len(solicitudes) + len(aprobados), "Total equipos", COLOR_ACENTO),
+        ], spacing=14)
+
+        # ── Sección: solicitudes pendientes ───────────────────────────────────
+        seccion_pendientes = Column([
+            Row([
+                Icon(icons.MARK_EMAIL_UNREAD, color=COLOR_ADVERTENCIA),
+                Text("Solicitudes Pendientes", size=17, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                Container(
+                    content=Text(str(len(solicitudes)), size=11, color=colors.WHITE,
+                                 weight=FontWeight.BOLD),
+                    bgcolor=COLOR_ADVERTENCIA if solicitudes else COLOR_TEXTO_SEC,
+                    padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+                    border_radius=20
+                ),
+            ], spacing=10),
+            Container(height=8),
+            self._construir_lista_solicitudes(solicitudes) if solicitudes else Container(
+                content=Column([
+                    Icon(icons.INBOX, size=52, color=COLOR_TEXTO_SEC),
+                    Text("Sin solicitudes pendientes", size=15, color=COLOR_TEXTO_SEC,
+                         weight=FontWeight.W_500),
+                    Text("Los equipos enviarán solicitudes automáticamente al intentar conectarse",
+                         size=12, color=COLOR_TEXTO_SEC, text_align=ft.TextAlign.CENTER),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                padding=50, bgcolor=COLOR_SUPERFICIE, border_radius=12,
+                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+            ),
+        ], spacing=5)
+
+        # ── Sección: equipos enlazados ────────────────────────────────────────
+        seccion_aprobados = Column([
+            Row([
+                Icon(icons.VERIFIED, color=COLOR_EXITO),
+                Text("Equipos Enlazados", size=17, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                Container(
+                    content=Text(str(len(aprobados)), size=11, color=colors.WHITE,
+                                 weight=FontWeight.BOLD),
+                    bgcolor=COLOR_EXITO,
+                    padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+                    border_radius=20
+                ),
+            ], spacing=10),
+            Container(height=8),
+            self._construir_tabla_aprobados(aprobados) if aprobados else Container(
+                content=Column([
+                    Icon(icons.LINK_OFF, size=52, color=COLOR_TEXTO_SEC),
+                    Text("No hay equipos enlazados aún", size=15, color=COLOR_TEXTO_SEC,
+                         weight=FontWeight.W_500),
+                    Text("Aprueba solicitudes para que los equipos puedan enviar tickets",
+                         size=12, color=COLOR_TEXTO_SEC, text_align=ft.TextAlign.CENTER),
+                ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                padding=50, bgcolor=COLOR_SUPERFICIE, border_radius=12,
+                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+            ),
+        ], spacing=5)
+
         return Column(
             controls=[
-                # Encabezado
-                Row([
-                    Icon(icons.NOTIFICATIONS_ACTIVE, size=32, color=COLOR_ACENTO),
-                    Column([
-                        Text("🔔 Solicitudes de Enlace", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                        Text("Equipos que desean conectarse al sistema de tickets", size=14, color=COLOR_TEXTO_SEC),
-                    ], spacing=2),
-                ], spacing=15),
-                
-                Container(height=15),
-                
-                # Contador y acciones
-                Row([
-                    Container(
-                        content=Row([
-                            Icon(icons.PENDING_ACTIONS, color=COLOR_ADVERTENCIA if solicitudes else COLOR_TEXTO_SEC),
-                            Text(f" {len(solicitudes)} solicitudes pendientes", 
-                                 weight=FontWeight.BOLD, 
-                                 color=COLOR_ADVERTENCIA if solicitudes else COLOR_TEXTO_SEC),
-                        ]),
-                        bgcolor=COLOR_SUPERFICIE_2,
-                        padding=ft.Padding.all(10),
-                        border_radius=8
-                    ),
-                    Container(
-                        content=Row([
-                            Icon(icons.CHECK_CIRCLE, color=COLOR_EXITO),
-                            Text(f" {len(aprobados)} equipos enlazados", color=COLOR_EXITO),
-                        ]),
-                        bgcolor=COLOR_SUPERFICIE_2,
-                        padding=ft.Padding.all(10),
-                        border_radius=8
-                    ),
-                    ft.Button(
-                        "🔄 Actualizar",
-                        icon=icons.REFRESH,
-                        on_click=lambda e: self._refrescar_vista()
-                    ),
-                ], spacing=15),
-                
+                header,
+                Container(height=16),
+                stats_row,
                 Container(height=20),
-                
-                # Solicitudes pendientes
-                Text("📨 Solicitudes Pendientes", size=18, weight=FontWeight.BOLD, color=COLOR_ACENTO),
-                Container(height=10),
-                
-                self._construir_lista_solicitudes(solicitudes) if solicitudes else Container(
-                    content=Column([
-                        Icon(icons.INBOX, size=48, color=COLOR_TEXTO_SEC),
-                        Text("No hay solicitudes pendientes", color=COLOR_TEXTO_SEC),
-                        Text("Los equipos enviarán solicitudes al intentar conectarse", size=12, color=COLOR_TEXTO_SEC),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
-                    padding=40,
-                    bgcolor=COLOR_SUPERFICIE,
-                    border_radius=10,
-                    border=ft.Border.all(1, COLOR_SUPERFICIE_2)
-                ),
-                
-                Container(height=30),
-                
-                # Equipos enlazados
-                Text("✅ Equipos Enlazados", size=18, weight=FontWeight.BOLD, color=COLOR_EXITO),
-                Container(height=10),
-                
-                self._construir_tabla_aprobados(aprobados) if aprobados else Container(
-                    content=Column([
-                        Icon(icons.LINK_OFF, size=48, color=COLOR_TEXTO_SEC),
-                        Text("No hay equipos enlazados", color=COLOR_TEXTO_SEC),
-                        Text("Aprueba solicitudes para que los equipos puedan enviar tickets", size=12, color=COLOR_TEXTO_SEC),
-                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
-                    padding=40, 
-                    bgcolor=COLOR_SUPERFICIE,
-                    border_radius=10,
-                    border=ft.Border.all(1, COLOR_SUPERFICIE_2)
-                ),
+                seccion_pendientes,
+                Container(height=24),
+                seccion_aprobados,
+                Container(height=20),
             ],
-            spacing=5,
+            spacing=0,
             scroll=ScrollMode.AUTO,
             expand=True
         )
     
     def _construir_lista_solicitudes(self, solicitudes: list) -> Container:
-        """Construye las tarjetas de solicitudes pendientes."""
+        """Construye las tarjetas de solicitudes pendientes con scroll."""
         tarjetas = []
-        
+
         for sol in solicitudes:
-            mac = sol.get("mac_address", "")
+            mac      = sol.get("mac_address", "")
             hostname = sol.get("hostname", "Desconocido")
-            usuario = sol.get("usuario_ad", "")
-            ip = sol.get("ip_address", "")
-            fecha = sol.get("fecha_solicitud", "")
+            usuario  = sol.get("usuario_ad", "")
+            ip       = sol.get("ip_address", "")
+            fecha    = sol.get("fecha_solicitud", "")
             intentos = sol.get("intentos", 1)
-            nombre = sol.get("nombre_equipo", hostname)
-            
-            # Formatear fecha
+            nombre   = sol.get("nombre_equipo", hostname)
+
             try:
                 from datetime import datetime
-                fecha_dt = datetime.fromisoformat(fecha)
+                fecha_dt  = datetime.fromisoformat(fecha)
                 fecha_str = fecha_dt.strftime("%d/%m/%Y %H:%M")
             except:
                 fecha_str = str(fecha)[:16]
-            
+
+            badge_intentos = Container(
+                content=Text(f"#{intentos} intentos", size=10, color=colors.WHITE,
+                             weight=FontWeight.BOLD),
+                bgcolor=COLOR_ERROR if intentos >= 3 else COLOR_ADVERTENCIA,
+                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                border_radius=20,
+                visible=intentos > 1
+            )
+
             tarjeta = Container(
                 content=Row([
-                    # Icono y estado
+                    # Avatar equipo
                     Container(
-                        content=Icon(icons.COMPUTER, size=32, color=colors.WHITE),
-                        bgcolor=COLOR_ADVERTENCIA,
-                        padding=15,
-                        border_radius=10
+                        content=Column([
+                            Icon(icons.COMPUTER, size=28, color=colors.WHITE),
+                            Text(str(intentos) if intentos > 1 else "",
+                                 size=10, color=colors.WHITE, visible=intentos > 1),
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
+                        bgcolor=COLOR_ERROR if intentos >= 3 else COLOR_ADVERTENCIA,
+                        padding=14, border_radius=12, width=60,
+                        alignment=ft.alignment.center
                     ),
-                    
-                    # Información
+
+                    # Datos del equipo
                     Column([
                         Row([
-                            Text(nombre[:25], weight=FontWeight.BOLD, color=COLOR_TEXTO, size=16),
-                            Container(
-                                content=Text(f"Intento #{intentos}", size=10, color=colors.WHITE),
-                                bgcolor=COLOR_INFO if intentos == 1 else COLOR_ADVERTENCIA,
-                                padding=ft.Padding.symmetric(horizontal=8, vertical=2),
-                                border_radius=10
-                            ) if intentos > 1 else Container(),
+                            Text(nombre[:30], weight=FontWeight.BOLD, color=COLOR_TEXTO, size=15),
+                            badge_intentos,
                         ], spacing=10),
-                        Text(f"🖥️ Hostname: {hostname}", size=12, color=COLOR_TEXTO_SEC),
-                        Text(f"👤 Usuario: {usuario or 'No identificado'}", size=12, color=COLOR_TEXTO_SEC),
                         Row([
-                            Text(f"🔗 MAC: {mac}", size=11, color=COLOR_TEXTO_SEC),
-                            Text(f"🌐 IP: {ip}", size=11, color=COLOR_TEXTO_SEC),
-                        ], spacing=15),
-                        Text(f"📅 Solicitado: {fecha_str}", size=11, color=COLOR_TEXTO_SEC),
-                    ], spacing=3, expand=True),
-                    
-                    # Botones de acción
+                            Icon(icons.DNS, size=13, color=COLOR_TEXTO_SEC),
+                            Text(hostname, size=12, color=COLOR_TEXTO_SEC),
+                            Container(width=8),
+                            Icon(icons.PERSON, size=13, color=COLOR_TEXTO_SEC),
+                            Text(usuario or "No identificado", size=12, color=COLOR_TEXTO_SEC),
+                        ], spacing=4),
+                        Row([
+                            Icon(icons.FINGERPRINT, size=13, color=COLOR_TEXTO_SEC),
+                            Text(mac, size=11, color=COLOR_TEXTO_SEC, selectable=True),
+                            Container(width=12),
+                            Icon(icons.WIFI, size=13, color=COLOR_TEXTO_SEC),
+                            Text(ip, size=11, color=COLOR_TEXTO_SEC),
+                        ], spacing=4),
+                        Row([
+                            Icon(icons.SCHEDULE, size=12, color=COLOR_TEXTO_SEC),
+                            Text(f"Solicitado: {fecha_str}", size=11, color=COLOR_TEXTO_SEC),
+                        ], spacing=4),
+                    ], spacing=5, expand=True),
+
+                    # Acciones
                     Column([
                         ft.Button(
                             "✅ Aprobar",
@@ -5992,75 +6049,119 @@ class PanelAdminIT:
                             color=colors.WHITE,
                             on_click=lambda e, m=mac: self._rechazar_solicitud(m)
                         ),
-                    ], spacing=5)
-                ], spacing=15),
+                    ], spacing=8, horizontal_alignment=ft.CrossAxisAlignment.END)
+                ], spacing=16, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 bgcolor=COLOR_SUPERFICIE,
-                padding=15,
-                border_radius=10,
-                border=ft.Border.all(2, COLOR_ADVERTENCIA)
+                padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+                border_radius=12,
+                border=ft.Border.all(
+                    2,
+                    COLOR_ERROR if intentos >= 3 else COLOR_ADVERTENCIA
+                )
             )
             tarjetas.append(tarjeta)
-        
+
+        # Lista con scroll si hay muchas solicitudes
         return Container(
-            content=Column(tarjetas, spacing=10),
-            expand=True
+            content=Column(
+                tarjetas,
+                spacing=10,
+                scroll=ScrollMode.AUTO
+            ),
+            height=min(len(tarjetas) * 145, 550) if len(tarjetas) > 3 else None,
+            expand=len(tarjetas) <= 3
         )
     
-    def _construir_tabla_aprobados(self, aprobados: list) -> DataTable:
-        """Construye la tabla de equipos aprobados."""
+    def _construir_tabla_aprobados(self, aprobados: list) -> Container:
+        """Construye la tabla de equipos aprobados con scroll horizontal y vertical."""
         columnas = [
-            DataColumn(Text("Nombre", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("#",        weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Nombre",   weight=FontWeight.BOLD, color=COLOR_TEXTO)),
             DataColumn(Text("Hostname", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("MAC", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("IP", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("MAC",      weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("IP",       weight=FontWeight.BOLD, color=COLOR_TEXTO)),
             DataColumn(Text("Aprobado", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Estado",   weight=FontWeight.BOLD, color=COLOR_TEXTO)),
             DataColumn(Text("Acciones", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
         ]
-        
+
         filas = []
-        for equipo in aprobados:
-            mac = equipo.get("mac_address", "")
-            nombre = equipo.get("nombre_equipo", "Sin nombre")[:20]
-            hostname = equipo.get("hostname", "")[:15]
-            ip = equipo.get("ip_address", "")
-            fecha = equipo.get("fecha_aprobacion", "")
-            
-            # Formatear fecha
+        for idx, equipo in enumerate(aprobados, start=1):
+            mac      = equipo.get("mac_address", "")
+            nombre   = equipo.get("nombre_equipo", "Sin nombre")[:25]
+            hostname = equipo.get("hostname", "")[:20]
+            ip       = equipo.get("ip_address", "")
+            fecha    = equipo.get("fecha_aprobacion", "")
+            activo   = equipo.get("activo", True)
+
             try:
                 from datetime import datetime
-                fecha_dt = datetime.fromisoformat(fecha)
-                fecha_str = fecha_dt.strftime("%d/%m/%Y")
+                fecha_dt  = datetime.fromisoformat(fecha)
+                fecha_str = fecha_dt.strftime("%d/%m/%Y %H:%M")
             except:
-                fecha_str = str(fecha)[:10]
-            
+                fecha_str = str(fecha)[:16]
+
+            badge_estado = Container(
+                content=Text(
+                    "● Activo" if activo else "● Inactivo",
+                    size=11, color=colors.WHITE, weight=FontWeight.BOLD
+                ),
+                bgcolor=COLOR_EXITO if activo else COLOR_TEXTO_SEC,
+                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                border_radius=20
+            )
+
             filas.append(DataRow(
+                color={"hovered": COLOR_SUPERFICIE_2},
                 cells=[
-                    DataCell(Text(nombre, color=COLOR_TEXTO)),
-                    DataCell(Text(hostname, size=11, color=COLOR_TEXTO_SEC)),
-                    DataCell(Text(mac[:17], size=10, color=COLOR_TEXTO_SEC)),
-                    DataCell(Text(ip, size=11, color=COLOR_TEXTO_SEC)),
+                    DataCell(Text(str(idx), size=12, color=COLOR_TEXTO_SEC)),
+                    DataCell(Text(nombre,   size=13, weight=FontWeight.W_500, color=COLOR_TEXTO)),
+                    DataCell(Text(hostname, size=12, color=COLOR_TEXTO_SEC)),
+                    DataCell(Text(mac,      size=11, color=COLOR_TEXTO_SEC, selectable=True)),
+                    DataCell(Text(ip,       size=12, color=COLOR_INFO)),
                     DataCell(Text(fecha_str, size=11, color=COLOR_EXITO)),
+                    DataCell(badge_estado),
                     DataCell(
-                        ft.IconButton(
-                            icon=icons.LINK_OFF,
-                            icon_color=COLOR_ERROR,
-                            tooltip="Revocar enlace",
-                            on_click=lambda e, m=mac: self._confirmar_revocar_enlace(m)
-                        )
+                        Row([
+                            ft.IconButton(
+                                icon=icons.LINK_OFF,
+                                icon_color=COLOR_ERROR,
+                                icon_size=20,
+                                tooltip="Revocar enlace",
+                                on_click=lambda e, m=mac: self._confirmar_revocar_enlace(m)
+                            ),
+                        ], spacing=0)
                     ),
                 ]
             ))
-        
-        return DataTable(
+
+        tabla = DataTable(
             columns=columnas,
             rows=filas,
             border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            border_radius=10,
             heading_row_color=COLOR_SUPERFICIE_2,
-            heading_row_height=45,
-            data_row_min_height=50,
-            data_row_max_height=60,
-            column_spacing=20,
-            show_checkbox_column=False
+            heading_row_height=48,
+            data_row_min_height=52,
+            data_row_max_height=64,
+            column_spacing=18,
+            show_checkbox_column=False,
+            expand=True
+        )
+
+        # Scroll horizontal dentro de un Row, scroll vertical en la Column padre
+        return Container(
+            content=Row(
+                [tabla],
+                scroll=ScrollMode.AUTO,
+                vertical_alignment=ft.CrossAxisAlignment.START
+            ),
+            bgcolor=COLOR_SUPERFICIE,
+            border_radius=12,
+            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            padding=ft.Padding.all(0),
+            height=min(len(filas) * 62 + 60, 520) if len(filas) > 6 else None,
+            expand=len(filas) <= 6
         )
     
     def _aprobar_solicitud(self, mac: str):
