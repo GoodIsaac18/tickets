@@ -5269,220 +5269,283 @@ class PanelAdminIT:
     def _vista_escaner_red(self) -> Column:
         """Construye la vista del escáner de red con referencias dinámicas."""
         self.escaner = EscanerRed(gestor=self.gestor)
-        
-        # Obtener info rápida de red
-        ip_local = obtener_ip_local()
-        ip_base = ".".join(ip_local.split(".")[:3])  # ej: "192.168.1"
+
+        ip_local        = obtener_ip_local()
+        ip_base         = ".".join(ip_local.split(".")[:3])
         servidor_activo = servidor_esta_activo()
-        
-        # Cargar datos (optimizado - solo lo necesario)
+
         try:
-            equipos_red = self.escaner.obtener_equipos_red()
+            equipos_red      = self.escaner.obtener_equipos_red()
             equipos_servidor = obtener_equipos_con_estado()
-            equipos_online = obtener_equipos_online()
-            
-            # Contadores
-            total_db = len(equipos_red) if not equipos_red.empty else 0
-            online_servidor = len(equipos_online)
-            total_servidor = len(equipos_servidor)
-            cambios = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
+            equipos_online   = obtener_equipos_online()
+            total_db         = len(equipos_red) if not equipos_red.empty else 0
+            online_servidor  = len(equipos_online)
+            total_servidor   = len(equipos_servidor)
+            cambios          = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
         except Exception as e:
-            print(f"[ERROR] Error cargando datos del escáner: {e}")
+            print(f"[ERROR] Cargando datos del escáner: {e}")
             equipos_red = pd.DataFrame()
             equipos_servidor = []
-            equipos_online = []
+            equipos_online   = []
             total_db = online_servidor = total_servidor = cambios = 0
-        
+
         # Controles de rango
         self.txt_rango_inicio = ft.TextField(
-            label="Desde",
-            value="1",
-            width=80,
-            text_align=TextAlign.CENTER
+            label="Desde", value="1", width=80, text_align=TextAlign.CENTER,
+            border_color=COLOR_ACENTO, focused_border_color=COLOR_PRIMARIO
         )
         self.txt_rango_fin = ft.TextField(
-            label="Hasta",
-            value="254",
-            width=80,
-            text_align=TextAlign.CENTER
+            label="Hasta", value="254", width=80, text_align=TextAlign.CENTER,
+            border_color=COLOR_ACENTO, focused_border_color=COLOR_PRIMARIO
         )
-        
-        # Barra de progreso para escaneo
+
+        # Progreso
         self.progress_escaneo = ft.ProgressBar(
-            width=400,
-            value=0,
-            bgcolor=COLOR_SUPERFICIE_2,
-            color=COLOR_ACENTO,
-            visible=False
+            value=0, bgcolor=COLOR_SUPERFICIE_2, color=COLOR_ACENTO, visible=False
         )
         self.lbl_progreso = Text("", size=12, color=COLOR_TEXTO_SEC, visible=False)
-        
-        # Guardar labels de KPI como atributos para actualización dinámica
-        self._escaner_label_online = Text(str(online_servidor), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
-        self._escaner_label_total_srv = Text(str(total_servidor), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
-        self._escaner_label_total_db = Text(str(total_db), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
-        self._escaner_label_cambios = Text(str(cambios), size=36, weight=FontWeight.BOLD, color=COLOR_TEXTO)
-        
+
+        # Labels dinámicos KPI
+        self._escaner_label_online    = Text(str(online_servidor), size=32, weight=FontWeight.BOLD, color=COLOR_EXITO)
+        self._escaner_label_total_srv = Text(str(total_servidor),  size=32, weight=FontWeight.BOLD, color=COLOR_INFO)
+        self._escaner_label_total_db  = Text(str(total_db),        size=32, weight=FontWeight.BOLD, color=COLOR_ACENTO)
+        self._escaner_label_cambios   = Text(str(cambios),          size=32, weight=FontWeight.BOLD,
+                                             color=COLOR_ADVERTENCIA if cambios else COLOR_TEXTO_SEC)
+
         # Construir tablas
         tabla_conectados = self._construir_tabla_equipos_conectados(equipos_servidor)
-        self.tabla_red = self._construir_tabla_red(equipos_red)
-        alertas_cambios = self._construir_alertas_cambios(equipos_red)
-        
-        # Guardar contenedores como atributos para actualización dinámica
+        self.tabla_red   = self._construir_tabla_red(equipos_red)
+        alertas_cambios  = self._construir_alertas_cambios(equipos_red)
+
+        # Contenedor de equipos conectados con scroll horizontal
         self._escaner_tabla_conectados = Container(
-            content=Column(
-                controls=[Row(controls=[tabla_conectados], scroll=ScrollMode.AUTO)],
-                scroll=ScrollMode.AUTO,
-            ) if equipos_servidor else Text(
-                "No hay equipos conectados al servidor. Inicia un escaneo para detectar equipos en la red.", 
-                color=COLOR_TEXTO_SEC, italic=True
+            content=(
+                Row([tabla_conectados], scroll=ScrollMode.AUTO)
+                if equipos_servidor
+                else Container(
+                    content=Column([
+                        Icon(icons.SIGNAL_WIFI_OFF, size=40, color=COLOR_TEXTO_SEC),
+                        Text("Sin equipos conectados en este momento", color=COLOR_TEXTO_SEC),
+                        Text("Inicia un escaneo para detectar equipos en la red",
+                             size=12, color=COLOR_TEXTO_SEC),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8),
+                    padding=30
+                )
             ),
-        )
-        
-        self._escaner_tabla_red = Container(
-            content=Column(
-                controls=[Row(controls=[self.tabla_red], scroll=ScrollMode.AUTO)],
-                scroll=ScrollMode.AUTO,
-            ),
-            expand=True,
-            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            height=min(len(equipos_servidor) * 54 + 52, 360) if equipos_servidor else None,
+            bgcolor=COLOR_SUPERFICIE,
             border_radius=10,
-            bgcolor=COLOR_SUPERFICIE
+            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            padding=ft.Padding.all(0) if equipos_servidor else ft.Padding.all(10),
+            clip_behavior=ft.ClipBehavior.HARD_EDGE
         )
-        
+
+        # Contenedor de historial con scroll horizontal
+        self._escaner_tabla_red = Container(
+            content=Row([self.tabla_red], scroll=ScrollMode.AUTO),
+            height=min(len(equipos_red) * 54 + 52, 480) if not equipos_red.empty else 120,
+            bgcolor=COLOR_SUPERFICIE,
+            border_radius=10,
+            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            clip_behavior=ft.ClipBehavior.HARD_EDGE
+        )
+
         self._escaner_alertas = Container(
-            content=alertas_cambios if cambios > 0 else Container(),
+            content=alertas_cambios if cambios > 0 else Container()
         )
-        
-        # Construir KPI cards con los labels almacenados
-        def _kpi_escaner(titulo, valor_text, icono, color, subtitulo):
+
+        # KPI card builder
+        def _kpi(titulo, label_widget, icono, color, subtitulo):
             return Container(
                 content=Column([
                     Row([
-                        Icon(icono, color=color, size=28),
-                        Text(subtitulo, size=12, color=COLOR_TEXTO_SEC) if subtitulo else Container()
-                    ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-                    Container(height=10),
-                    valor_text,
-                    Text(titulo, size=14, color=COLOR_TEXTO_SEC)
-                ], spacing=5),
+                        Container(
+                            content=Icon(icono, size=22, color=colors.WHITE),
+                            bgcolor=color, padding=10, border_radius=10
+                        ),
+                        Column([
+                            label_widget,
+                            Text(titulo, size=11, color=COLOR_TEXTO_SEC),
+                        ], spacing=0),
+                    ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    Text(subtitulo, size=10, color=COLOR_TEXTO_SEC),
+                ], spacing=6),
                 bgcolor=COLOR_SUPERFICIE,
-                border_radius=ft.BorderRadius.all(15),
-                padding=20,
-                width=200,
-                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+                border_radius=12,
+                padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+                border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+                expand=True
             )
-        
-        # Construir la columna
+
         return Column(
             controls=[
-                # Título
-                Row([
-                    Icon(icons.WIFI_TETHERING, size=28, color=COLOR_ACENTO),
-                    Text("Escaneo de Red", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                    Container(expand=True),
-                    # Estado del servidor
-                    Container(
-                        content=Row([
-                            Icon(icons.CIRCLE, size=12, 
-                                 color=COLOR_EXITO if servidor_activo else COLOR_ERROR),
-                            Text(f"Servidor {'Activo' if servidor_activo else 'Inactivo'}", 
-                                 size=12, color=COLOR_TEXTO_SEC),
-                        ], spacing=5),
-                        bgcolor=COLOR_SUPERFICIE_2,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
-                        border_radius=15
-                    )
-                ], spacing=10),
-                Text("💡 Escanea la red para detectar equipos. Haz clic en ➕ para guardarlos en la sección 'Equipos'", 
-                     size=12, color=COLOR_TEXTO_SEC),
-                Container(height=10),
-                
-                # Info de red
+
+                # ── Header ─────────────────────────────────────────────────────
                 Container(
                     content=Row([
-                        Icon(icons.INFO_OUTLINE, color=COLOR_INFO),
-                        Text(f"IP Servidor: {ip_local}", color=COLOR_TEXTO, weight=FontWeight.BOLD),
-                        Text(f"  |  Red: {ip_base}.x", color=COLOR_TEXTO_SEC),
-                        Text(f"  |  Puerto: {SERVIDOR_PUERTO}", color=COLOR_TEXTO_SEC),
-                    ]),
-                    bgcolor=COLOR_SUPERFICIE_2,
-                    padding=10,
-                    border_radius=8
+                        Container(
+                            content=Icon(icons.WIFI_TETHERING, size=32, color=colors.WHITE),
+                            bgcolor=COLOR_ACENTO, padding=13, border_radius=12
+                        ),
+                        Column([
+                            Text("Escaneo de Red", size=22, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                            Text("Detecta, monitorea y agrega equipos de la red local al inventario",
+                                 size=13, color=COLOR_TEXTO_SEC),
+                        ], spacing=3, expand=True),
+                        Container(
+                            content=Row([
+                                Icon(icons.CIRCLE, size=11,
+                                     color=COLOR_EXITO if servidor_activo else COLOR_ERROR),
+                                Text("Servidor activo" if servidor_activo else "Servidor inactivo",
+                                     size=12, color=COLOR_TEXTO_SEC),
+                            ], spacing=6),
+                            bgcolor=COLOR_SUPERFICIE_2,
+                            padding=ft.Padding.symmetric(horizontal=12, vertical=7),
+                            border_radius=20
+                        ),
+                    ], spacing=16, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                    bgcolor=COLOR_SUPERFICIE,
+                    padding=ft.Padding.symmetric(horizontal=20, vertical=16),
+                    border_radius=14,
+                    border=ft.Border.all(1, COLOR_SUPERFICIE_2)
                 ),
-                Container(height=15),
-                
-                # KPIs con labels dinámicos
+
+                Container(height=14),
+
+                # ── Barra info red ──────────────────────────────────────────────
+                Container(
+                    content=Row([
+                        Icon(icons.ROUTER, color=COLOR_INFO, size=18),
+                        Text("IP del servidor:", size=12, color=COLOR_TEXTO_SEC),
+                        Text(ip_local, size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Container(width=12),
+                        Icon(icons.LAN, color=COLOR_TEXTO_SEC, size=16),
+                        Text(f"Red: {ip_base}.1 – {ip_base}.254", size=12, color=COLOR_TEXTO_SEC),
+                        Container(width=12),
+                        Icon(icons.SETTINGS_ETHERNET, color=COLOR_TEXTO_SEC, size=16),
+                        Text(f"Puerto: {SERVIDOR_PUERTO}", size=12, color=COLOR_TEXTO_SEC),
+                    ], spacing=8),
+                    bgcolor=COLOR_SUPERFICIE_2,
+                    padding=ft.Padding.symmetric(horizontal=16, vertical=10),
+                    border_radius=10
+                ),
+
+                Container(height=14),
+
+                # ── KPI cards ───────────────────────────────────────────────────
                 Row([
-                    _kpi_escaner("Conectados", self._escaner_label_online, icons.WIFI, COLOR_EXITO, "En línea ahora"),
-                    _kpi_escaner("Registrados", self._escaner_label_total_srv, icons.DEVICES, COLOR_INFO, "En servidor"),
-                    _kpi_escaner("En BD", self._escaner_label_total_db, icons.STORAGE, COLOR_ACENTO, "Base datos"),
-                    _kpi_escaner("Cambios IP", self._escaner_label_cambios, icons.SWAP_HORIZ, COLOR_ADVERTENCIA, "Detectados"),
-                ], wrap=True),
-                Container(height=20),
-                
-                # SECCIÓN: EQUIPOS CONECTADOS EN TIEMPO REAL
+                    _kpi("En línea",    self._escaner_label_online,    icons.WIFI,        COLOR_EXITO,       "Conectados ahora"),
+                    _kpi("Registrados", self._escaner_label_total_srv,  icons.DEVICES,     COLOR_INFO,        "En el servidor"),
+                    _kpi("En BD Red",   self._escaner_label_total_db,   icons.STORAGE,     COLOR_ACENTO,      "Base de datos"),
+                    _kpi("Cambios IP",  self._escaner_label_cambios,    icons.SWAP_HORIZ,  COLOR_ADVERTENCIA, "Detectados"),
+                ], spacing=12),
+
+                Container(height=18),
+
+                # ── Equipos conectados ──────────────────────────────────────────
                 Container(
                     content=Column([
                         Row([
-                            Icon(icons.SENSORS, color=COLOR_EXITO),
-                            Text("📡 Equipos Conectados Ahora", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                            Container(
+                                content=Icon(icons.SENSORS, size=18, color=colors.WHITE),
+                                bgcolor=COLOR_EXITO, padding=8, border_radius=8
+                            ),
+                            Text("Equipos Conectados Ahora", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                            Container(
+                                content=Text(str(online_servidor), size=11, color=colors.WHITE,
+                                             weight=FontWeight.BOLD),
+                                bgcolor=COLOR_EXITO,
+                                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                                border_radius=20
+                            ),
                             Container(expand=True),
-                            ft.IconButton(
-                                icon=icons.REFRESH,
-                                icon_color=COLOR_ACENTO,
-                                tooltip="Actualizar lista",
+                            ft.Button(
+                                "Actualizar", icon=icons.REFRESH,
                                 on_click=self._refrescar_equipos_conectados
-                            )
+                            ),
                         ], spacing=10),
-                        Container(height=10),
-                        self._escaner_tabla_conectados
+                        Container(height=12),
+                        self._escaner_tabla_conectados,
                     ]),
                     bgcolor=COLOR_SUPERFICIE,
-                    padding=15,
-                    border_radius=10,
-                    border=ft.Border.all(1, COLOR_EXITO + "40")
+                    padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+                    border_radius=12,
+                    border=ft.Border.all(1, COLOR_EXITO + "55")
                 ),
-                Container(height=20),
-                
-                # Alertas de cambios de IP
+
+                Container(height=14),
+
+                # ── Alertas de cambios de IP ─────────────────────────────────
                 self._escaner_alertas,
-                
-                # SECCIÓN: ESCANEO DE RED
+
+                # ── Escanear red ─────────────────────────────────────────────
                 Container(
                     content=Column([
                         Row([
-                            Icon(icons.RADAR, color=COLOR_INFO),
-                            Text("🔍 Escanear Red Local", weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                            Container(
+                                content=Icon(icons.RADAR, size=18, color=colors.WHITE),
+                                bgcolor=COLOR_PRIMARIO, padding=8, border_radius=8
+                            ),
+                            Text("Escanear Red Local", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                             Container(expand=True),
-                            Text(f"Rango: {ip_base}.", color=COLOR_TEXTO_SEC),
+                            Text(f"{ip_base}.", size=13, color=COLOR_TEXTO_SEC),
                             self.txt_rango_inicio,
-                            Text("-", color=COLOR_TEXTO_SEC),
-                            Text(f"{ip_base}.", color=COLOR_TEXTO_SEC),
+                            Text("—", color=COLOR_TEXTO_SEC),
+                            Text(f"{ip_base}.", size=13, color=COLOR_TEXTO_SEC),
                             self.txt_rango_fin,
+                            Container(width=6),
                             ft.Button(
-                                "🚀 Escanear",
+                                "🚀 Iniciar escaneo",
                                 icon=icons.RADAR,
                                 on_click=self._iniciar_escaneo_red,
                                 bgcolor=COLOR_PRIMARIO,
                                 color=colors.WHITE
                             ),
-                        ], spacing=10),
-                        Row([
-                            self.progress_escaneo,
-                            self.lbl_progreso,
-                        ], spacing=10),
+                        ], spacing=8),
+                        Container(height=8),
+                        Row([self.progress_escaneo, self.lbl_progreso], spacing=10),
                     ]),
                     bgcolor=COLOR_SUPERFICIE,
-                    padding=15,
-                    border_radius=10
+                    padding=ft.Padding.symmetric(horizontal=16, vertical=14),
+                    border_radius=12,
+                    border=ft.Border.all(1, COLOR_SUPERFICIE_2)
                 ),
-                Container(height=15),
-                
-                # SECCIÓN: HISTORIAL DE EQUIPOS DETECTADOS
-                Text("📋 Historial de Equipos (Base de Datos)", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
-                Container(height=10),
-                self._escaner_tabla_red
+
+                Container(height=18),
+
+                # ── Historial de equipos ─────────────────────────────────────
+                Column([
+                    Row([
+                        Container(
+                            content=Icon(icons.HISTORY, size=18, color=colors.WHITE),
+                            bgcolor=COLOR_TEXTO_SEC, padding=8, border_radius=8
+                        ),
+                        Text("Historial de Equipos Detectados", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Container(
+                            content=Text(str(total_db), size=11, color=colors.WHITE, weight=FontWeight.BOLD),
+                            bgcolor=COLOR_ACENTO,
+                            padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                            border_radius=20
+                        ),
+                        Container(expand=True),
+                        Text("Haz clic en ➕ para agregar al inventario", size=11, color=COLOR_TEXTO_SEC),
+                    ], spacing=10),
+                    Container(height=10),
+                    self._escaner_tabla_red
+                        if not equipos_red.empty
+                        else Container(
+                            content=Column([
+                                Icon(icons.SEARCH_OFF, size=48, color=COLOR_TEXTO_SEC),
+                                Text("No hay equipos en el historial", color=COLOR_TEXTO_SEC),
+                                Text("Inicia un escaneo para poblar esta tabla",
+                                     size=12, color=COLOR_TEXTO_SEC),
+                            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
+                            padding=40, bgcolor=COLOR_SUPERFICIE, border_radius=12,
+                            border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+                        ),
+                ], spacing=0),
+
+                Container(height=20),
             ],
             scroll=ScrollMode.AUTO,
             expand=True
@@ -5491,64 +5554,84 @@ class PanelAdminIT:
     def _construir_tabla_equipos_conectados(self, equipos: List[Dict]) -> DataTable:
         """Construye la tabla de equipos conectados al servidor."""
         columnas = [
-            DataColumn(Text("Estado", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("IP", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("Hostname", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("Usuario", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("MAC", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("Última Actividad", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("#",              weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Estado",         weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("IP",             weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Hostname",       weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Usuario AD",     weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("MAC",            weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Última act.",    weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Tickets hoy",   weight=FontWeight.BOLD, color=COLOR_TEXTO)),
         ]
-        
+
         filas = []
         import time
         ahora = time.time()
-        
-        for equipo in equipos:
-            online = equipo.get("online", False)
-            ip = str(equipo.get("ip_address", "-") or "-")
-            hostname = str(equipo.get("hostname", "Desconocido") or "Desconocido")
-            usuario = str(equipo.get("usuario_ad", "-") or "-")
-            mac = str(equipo.get("mac_address", "-") or "-")
+
+        for idx, equipo in enumerate(equipos, start=1):
+            online           = equipo.get("online", False)
+            ip               = str(equipo.get("ip_address", "-") or "-")
+            hostname         = str(equipo.get("hostname", "Desconocido") or "Desconocido")
+            usuario          = str(equipo.get("usuario_ad", "-") or "-")
+            mac              = str(equipo.get("mac_address", "-") or "-")
             ultimo_heartbeat = equipo.get("ultimo_heartbeat", 0)
-            
-            # Calcular tiempo desde último heartbeat
+            tickets_hoy      = int(equipo.get("tickets_hoy", 0) or 0)
+
             if ultimo_heartbeat > 0:
-                segundos = int(ahora - ultimo_heartbeat)
-                if segundos < 60:
-                    tiempo_str = f"Hace {segundos}s"
-                elif segundos < 3600:
-                    tiempo_str = f"Hace {segundos // 60}m"
+                seg = int(ahora - ultimo_heartbeat)
+                if seg < 60:
+                    tiempo_str = f"{seg}s atrás"
+                elif seg < 3600:
+                    tiempo_str = f"{seg // 60}m atrás"
                 else:
-                    tiempo_str = f"Hace {segundos // 3600}h"
+                    tiempo_str = f"{seg // 3600}h atrás"
             else:
-                tiempo_str = "-"
-            
+                tiempo_str = "—"
+
             color_estado = COLOR_EXITO if online else COLOR_TEXTO_SEC
-            
+            badge_online = Container(
+                content=Text(
+                    "● Online" if online else "○ Offline",
+                    size=11, color=colors.WHITE, weight=FontWeight.W_500
+                ),
+                bgcolor=COLOR_EXITO if online else COLOR_SUPERFICIE_2,
+                padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+                border_radius=20
+            )
+
             filas.append(DataRow(
+                color={"hovered": COLOR_SUPERFICIE_2},
                 cells=[
-                    DataCell(Row([
-                        Icon(icons.CIRCLE, size=12, color=color_estado),
-                        Text("Online" if online else "Offline", size=12, color=color_estado)
-                    ], spacing=5)),
-                    DataCell(Text(ip, size=12, color=COLOR_TEXTO, weight=FontWeight.BOLD)),
-                    DataCell(Text(hostname[:20], size=12, color=COLOR_TEXTO)),
-                    DataCell(Text(usuario[:15], size=11, color=COLOR_TEXTO_SEC)),
-                    DataCell(Text(mac, size=10, color=COLOR_TEXTO_SEC)),
-                    DataCell(Text(tiempo_str, size=11, color=color_estado)),
+                    DataCell(Text(str(idx), size=12, color=COLOR_TEXTO_SEC)),
+                    DataCell(badge_online),
+                    DataCell(Text(ip,              size=13, weight=FontWeight.BOLD, color=COLOR_INFO)),
+                    DataCell(Text(hostname[:25],    size=12, color=COLOR_TEXTO)),
+                    DataCell(Text(usuario[:20],     size=11, color=COLOR_TEXTO_SEC)),
+                    DataCell(Text(mac,              size=10, color=COLOR_TEXTO_SEC, selectable=True)),
+                    DataCell(Text(tiempo_str,       size=11, color=color_estado)),
+                    DataCell(
+                        Container(
+                            content=Text(str(tickets_hoy), size=11, color=colors.WHITE,
+                                         weight=FontWeight.BOLD),
+                            bgcolor=COLOR_ACENTO if tickets_hoy else "transparent",
+                            padding=ft.Padding.symmetric(horizontal=8, vertical=2),
+                            border_radius=20
+                        ) if tickets_hoy else Text("0", size=11, color=COLOR_TEXTO_SEC)
+                    ),
                 ]
             ))
-        
+
         return DataTable(
             columns=columnas,
             rows=filas,
             border=ft.Border.all(1, COLOR_SUPERFICIE_2),
             heading_row_color=COLOR_SUPERFICIE_2,
-            heading_row_height=40,
-            data_row_min_height=40,
-            data_row_max_height=50,
-            column_spacing=15,
-            show_checkbox_column=False
+            heading_row_height=44,
+            data_row_min_height=48,
+            data_row_max_height=56,
+            column_spacing=14,
+            show_checkbox_column=False,
+            horizontal_lines=ft.border.BorderSide(1, COLOR_SUPERFICIE_2)
         )
     
     def _refrescar_equipos_conectados(self, e):
@@ -5600,83 +5683,96 @@ class PanelAdminIT:
         )
     
     def _construir_tabla_red(self, equipos: pd.DataFrame) -> DataTable:
-        """Construye la tabla de equipos de red."""
+        """Construye la tabla de historial de equipos de red."""
         columnas = [
-            DataColumn(Text("IP", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("MAC", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("Hostname", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("Estado", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("Último Ping", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("#",          weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("IP",         weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("MAC",        weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Hostname",   weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Estado",     weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Últ. Ping",  weight=FontWeight.BOLD, color=COLOR_TEXTO)),
             DataColumn(Text("Cambios IP", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
-            DataColumn(Text("Acciones", weight=FontWeight.BOLD, color=COLOR_TEXTO)),
+            DataColumn(Text("Acciones",   weight=FontWeight.BOLD, color=COLOR_TEXTO)),
         ]
-        
+
         filas = []
-        for _, equipo in equipos.iterrows():
-            ip = str(equipo.get("IP_ADDRESS", "") or "")
-            mac = str(equipo.get("MAC_ADDRESS", "") or "")
+        for idx, (_, equipo) in enumerate(equipos.iterrows(), start=1):
+            ip           = str(equipo.get("IP_ADDRESS", "") or "")
+            mac          = str(equipo.get("MAC_ADDRESS", "") or "")
             hostname_raw = equipo.get("HOSTNAME", "")
-            hostname = str(hostname_raw) if pd.notna(hostname_raw) and hostname_raw else "Desconocido"
-            estado = str(equipo.get("ESTADO_RED", "Desconocido") or "Desconocido")
-            ultimo_ping = equipo.get("ULTIMO_PING", "")
-            cambios = int(equipo.get("CAMBIOS_IP", 0)) if pd.notna(equipo.get("CAMBIOS_IP")) else 0
-            
-            # Formatear fecha
-            if pd.notna(ultimo_ping) and hasattr(ultimo_ping, 'strftime'):
-                ultimo_ping_str = ultimo_ping.strftime("%H:%M:%S")
+            hostname     = str(hostname_raw) if pd.notna(hostname_raw) and hostname_raw else "Desconocido"
+            estado       = str(equipo.get("ESTADO_RED", "Desconocido") or "Desconocido")
+            ultimo_ping  = equipo.get("ULTIMO_PING", "")
+            cambios      = int(equipo.get("CAMBIOS_IP", 0)) if pd.notna(equipo.get("CAMBIOS_IP")) else 0
+
+            if pd.notna(ultimo_ping) and hasattr(ultimo_ping, "strftime"):
+                ping_str = ultimo_ping.strftime("%d/%m %H:%M")
             elif pd.notna(ultimo_ping):
-                ultimo_ping_str = str(ultimo_ping)[-8:]
+                ping_str = str(ultimo_ping)[-16:]
             else:
-                ultimo_ping_str = "-"
-            
-            # Color según estado
-            color_estado = COLOR_EXITO if estado == "Online" else COLOR_TEXTO_SEC
-            icono_estado = icons.CHECK_CIRCLE if estado == "Online" else icons.CANCEL
-            
+                ping_str = "—"
+
+            online = estado == "Online"
+            color_estado = COLOR_EXITO if online else COLOR_TEXTO_SEC
+            badge_estado = Container(
+                content=Text(
+                    "● Online" if online else "○ Offline",
+                    size=11, color=colors.WHITE, weight=FontWeight.W_500
+                ),
+                bgcolor=COLOR_EXITO if online else COLOR_SUPERFICIE_2,
+                padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+                border_radius=20
+            )
+
+            badge_cambios = (
+                Container(
+                    content=Text(f"⚠ {cambios}", size=11, color=colors.WHITE, weight=FontWeight.BOLD),
+                    bgcolor=COLOR_ERROR if cambios >= 3 else COLOR_ADVERTENCIA,
+                    padding=ft.Padding.symmetric(horizontal=9, vertical=3),
+                    border_radius=20
+                )
+                if cambios > 0
+                else Text("0", size=11, color=COLOR_TEXTO_SEC)
+            )
+
             filas.append(DataRow(
+                color={"hovered": COLOR_SUPERFICIE_2},
                 cells=[
-                    DataCell(Text(ip, size=12, color=COLOR_TEXTO, weight=FontWeight.BOLD)),
-                    DataCell(Text(mac[:17], size=11, color=COLOR_TEXTO_SEC)),
-                    DataCell(Text(hostname[:20], size=11, color=COLOR_TEXTO)),
-                    DataCell(Row([
-                        Icon(icono_estado, size=14, color=color_estado),
-                        Text(estado, size=11, color=color_estado)
-                    ], spacing=5)),
-                    DataCell(Text(ultimo_ping_str, size=11, color=COLOR_TEXTO_SEC)),
-                    DataCell(
-                        Container(
-                            content=Text(str(cambios), size=11, color=colors.WHITE if cambios > 0 else COLOR_TEXTO_SEC),
-                            bgcolor=COLOR_ADVERTENCIA if cambios > 0 else "transparent",
-                            padding=ft.Padding.symmetric(horizontal=8, vertical=2),
-                            border_radius=10
-                        ) if cambios > 0 else Text("0", size=11, color=COLOR_TEXTO_SEC)
-                    ),
+                    DataCell(Text(str(idx),      size=12, color=COLOR_TEXTO_SEC)),
+                    DataCell(Text(ip,            size=13, weight=FontWeight.BOLD, color=COLOR_INFO)),
+                    DataCell(Text(mac,           size=10, color=COLOR_TEXTO_SEC, selectable=True)),
+                    DataCell(Text(hostname[:25], size=12, color=COLOR_TEXTO)),
+                    DataCell(badge_estado),
+                    DataCell(Text(ping_str,      size=11, color=COLOR_TEXTO_SEC)),
+                    DataCell(badge_cambios),
                     DataCell(Row([
                         ft.IconButton(
-                            icon=icons.ADD_CIRCLE,
+                            icon=icons.ADD_CIRCLE_OUTLINE,
                             icon_color=COLOR_ACENTO,
+                            icon_size=22,
                             tooltip="Agregar a Inventario",
                             on_click=lambda e, m=mac, h=hostname, i=ip: self._agregar_a_inventario(m, h, i)
                         ),
                         ft.IconButton(
-                            icon=icons.REFRESH,
+                            icon=icons.WIFI_FIND,
                             icon_color=COLOR_INFO,
+                            icon_size=22,
                             tooltip="Hacer ping",
                             on_click=lambda e, i=ip: self._ping_individual(i)
-                        )
-                    ], spacing=0))
+                        ),
+                    ], spacing=0)),
                 ]
             ))
-        
+
         return DataTable(
             columns=columnas,
             rows=filas,
             border=ft.Border.all(1, COLOR_SUPERFICIE_2),
             heading_row_color=COLOR_SUPERFICIE_2,
-            heading_row_height=45,
-            data_row_min_height=45,
-            data_row_max_height=55,
-            column_spacing=15,
+            heading_row_height=46,
+            data_row_min_height=50,
+            data_row_max_height=58,
+            column_spacing=14,
             show_checkbox_column=False,
             horizontal_lines=ft.border.BorderSide(1, COLOR_SUPERFICIE_2)
         )
@@ -5727,49 +5823,60 @@ class PanelAdminIT:
             def actualizar_ui():
                 self.progress_escaneo.visible = False
                 self.lbl_progreso.visible = False
-                
-                # Refrescar tabla y datos
+
                 try:
-                    equipos_red = self.escaner.obtener_equipos_red()
+                    equipos_red      = self.escaner.obtener_equipos_red()
                     equipos_servidor = obtener_equipos_con_estado()
-                    equipos_online = obtener_equipos_online()
-                    
-                    # Actualizar tabla de red con scroll
+                    equipos_online   = obtener_equipos_online()
+
+                    # Reconstruir tabla de historial (scroll horizontal)
                     tabla_red_nueva = self._construir_tabla_red(equipos_red)
-                    self._escaner_tabla_red.content = Column(
-                        controls=[Row(controls=[tabla_red_nueva], scroll=ScrollMode.AUTO)],
-                        scroll=ScrollMode.AUTO,
+                    self._escaner_tabla_red.content = Row([tabla_red_nueva], scroll=ScrollMode.AUTO)
+                    self._escaner_tabla_red.height  = (
+                        min(len(equipos_red) * 54 + 52, 480) if not equipos_red.empty else 120
                     )
-                    
-                    # Actualizar tabla conectados con scroll
+
+                    # Reconstruir tabla de conectados (scroll horizontal)
                     tabla_conectados_nueva = self._construir_tabla_equipos_conectados(equipos_servidor)
-                    self._escaner_tabla_conectados.content = Column(
-                        controls=[Row(controls=[tabla_conectados_nueva], scroll=ScrollMode.AUTO)],
-                        scroll=ScrollMode.AUTO,
-                    ) if equipos_servidor else Text(
-                        "No hay equipos conectados al servidor",
-                        color=COLOR_TEXTO_SEC, italic=True
+                    if equipos_servidor:
+                        self._escaner_tabla_conectados.content = Row(
+                            [tabla_conectados_nueva], scroll=ScrollMode.AUTO
+                        )
+                        self._escaner_tabla_conectados.height = min(
+                            len(equipos_servidor) * 54 + 52, 360
+                        )
+                    else:
+                        self._escaner_tabla_conectados.content = Container(
+                            content=Column([
+                                Icon(icons.SIGNAL_WIFI_OFF, size=40, color=COLOR_TEXTO_SEC),
+                                Text("Sin equipos conectados", color=COLOR_TEXTO_SEC),
+                            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=8),
+                            padding=30
+                        )
+                        self._escaner_tabla_conectados.height = None
+
+                    # Alertas
+                    cambios_count = (
+                        len(equipos_red[equipos_red["CAMBIOS_IP"] > 0])
+                        if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
                     )
-                    
-                    # Actualizar alertas
-                    cambios_count = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
-                    alertas_cambios_nueva = self._construir_alertas_cambios(equipos_red)
-                    self._escaner_alertas.content = alertas_cambios_nueva if cambios_count > 0 else Container()
-                    
-                    # Actualizar stats
-                    self._escaner_label_total_db.value = str(len(equipos_red) if not equipos_red.empty else 0)
-                    self._escaner_label_online.value = str(len(equipos_online))
+                    alertas_nueva = self._construir_alertas_cambios(equipos_red)
+                    self._escaner_alertas.content = alertas_nueva if cambios_count > 0 else Container()
+
+                    # KPI labels
+                    self._escaner_label_total_db.value  = str(len(equipos_red) if not equipos_red.empty else 0)
+                    self._escaner_label_online.value    = str(len(equipos_online))
                     self._escaner_label_total_srv.value = str(len(equipos_servidor))
-                    self._escaner_label_cambios.value = str(cambios_count)
-                    
+                    self._escaner_label_cambios.value   = str(cambios_count)
+                    self._escaner_label_cambios.color   = COLOR_ADVERTENCIA if cambios_count else COLOR_TEXTO_SEC
+
                 except Exception as ex:
-                    print(f"[ERROR] Error actualizando tabla: {ex}")
-                
+                    print(f"[ERROR] Actualizando tabla: {ex}")
+
                 msg = f"✅ Escaneo completado: {len(equipos)} equipos encontrados"
                 if cambios:
                     msg += f", {len(cambios)} cambios de IP detectados"
                 self._mostrar_snackbar(msg, COLOR_EXITO)
-                
                 self.page.update()
             
             # Ejecutar actualización de forma segura
