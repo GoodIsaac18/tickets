@@ -149,35 +149,51 @@ Sistema de Tickets IT v3.0 — Soporte Técnico Profesional"""
 # FUNCIONES DE UTILIDAD
 # =============================================================================
 
-def obtener_escritorio():
-    """Devuelve la ruta real del escritorio del usuario.
+def _shget_folder(csidl: int) -> Path:
+    """Llama a SHGetFolderPathW (shell32.dll) para obtener rutas especiales
+    de Windows de forma correcta en cualquier idioma.
 
-    En Windows la carpeta puede llamarse "Desktop", "Escritorio",
-    etc. usar la API COM de WScript.Shell garantiza el nombre correcto
-    según idioma y cuenta actual. Si la importación falla, se cae a un
-    fallback simple.
+    CSIDLs usados:
+      0x0010  CSIDL_DESKTOPDIRECTORY  – Escritorio / Desktop
+      0x000B  CSIDL_STARTMENU         – Start Menu raíz
+      0x0002  CSIDL_PROGRAMS          – Start Menu\\Programs
+      0x0007  CSIDL_STARTUP           – Start Menu\\Programs\\Startup
     """
     try:
-        from win32com.client import Dispatch
-        shell = Dispatch("WScript.Shell")
-        return Path(shell.SpecialFolders("Desktop"))
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        ctypes.windll.shell32.SHGetFolderPathW(0, csidl, 0, 0, buf)
+        ruta = buf.value
+        if ruta:
+            return Path(ruta)
     except Exception:
-        # fallback tradicional
-        return Path(os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"))
+        pass
+    # Fallback genérico si shell32 no responde
+    return Path(os.environ.get("USERPROFILE", ""))
 
 
-def obtener_menu_inicio():
-    """Devuelve la carpeta "Start Menu\Programs" correcta."""
-    try:
-        from win32com.client import Dispatch
-        shell = Dispatch("WScript.Shell")
-        # SpecialFolders("StartMenu") apunta a …\Start Menu; agregamos Programs
-        return Path(shell.SpecialFolders("StartMenu")) / "Programs"
-    except Exception:
-        return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs"))
+def obtener_escritorio() -> Path:
+    """Devuelve la ruta real del Escritorio, independiente del idioma de Windows."""
+    ruta = _shget_folder(0x0010)  # CSIDL_DESKTOPDIRECTORY
+    if ruta != Path(os.environ.get("USERPROFILE", "")):
+        return ruta
+    # Último fallback
+    return Path(os.environ.get("USERPROFILE", "")) / "Desktop"
 
 
-def obtener_carpeta_startup():
+def obtener_menu_inicio() -> Path:
+    """Devuelve …\\Start Menu\\Programs en el idioma correcto."""
+    ruta = _shget_folder(0x0002)  # CSIDL_PROGRAMS
+    if ruta != Path(os.environ.get("USERPROFILE", "")):
+        return ruta
+    return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+
+
+def obtener_carpeta_startup() -> Path:
+    """Devuelve la carpeta Startup del usuario (inicio automático)."""
+    ruta = _shget_folder(0x0007)  # CSIDL_STARTUP
+    if ruta != Path(os.environ.get("USERPROFILE", "")):
+        return ruta
     return obtener_menu_inicio() / "Startup"
 
 def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
