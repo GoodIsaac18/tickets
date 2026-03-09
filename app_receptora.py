@@ -182,6 +182,7 @@ class PanelAdminIT:
         self._construir_ui()
         self._iniciar_auto_refresh()
         self._iniciar_servidor_tickets()
+        self._iniciar_backup_automatico()
     
     def _configurar_pagina(self):
         """Configura las propiedades de la página."""
@@ -359,6 +360,11 @@ class PanelAdminIT:
                     selected_icon=icons.NOTIFICATIONS_ACTIVE,
                     label="Solicitudes"
                 ),
+                NavigationRailDestination(
+                    icon=icons.MANAGE_SEARCH_OUTLINED,
+                    selected_icon=icons.MANAGE_SEARCH,
+                    label="Búsqueda"
+                ),
             ],
             on_change=self._cambiar_vista
         )
@@ -375,7 +381,8 @@ class PanelAdminIT:
             self._vista_reportes,
             self._vista_inventario,
             self._vista_escaner_red,
-            self._vista_solicitudes
+            self._vista_solicitudes,
+            self._vista_busqueda_global,
         ]
         self.contenido.content = vistas[self.vista_actual]()
         self.page.update()
@@ -390,14 +397,37 @@ class PanelAdminIT:
         tecnicos = self.gestor.obtener_tecnicos()
         cola = self.gestor.obtener_tickets_en_cola()
         todos_tickets = self.gestor.obtener_todos_tickets()
-        
+
+        # Stats reales del dashboard (sin simulaciones)
+        self._stats_dash = self.gestor.obtener_stats_dashboard_reales()
+
         # Calcular estadísticas avanzadas
         tickets_hoy = stats["tickets_hoy"]
         resueltos_hoy = stats["tickets_cerrados"]
         tasa_resolucion = (resueltos_hoy / tickets_hoy * 100) if tickets_hoy > 0 else 0
         tasa_cumplimiento_sla = self._calcular_cumplimiento_sla(todos_tickets)
         tickets_en_espera = len(todos_tickets[todos_tickets.get("ESTADO") == "En Espera"]) if not todos_tickets.empty else 0
-        
+
+        # Tickets de ayer (comparativa real)
+        try:
+            from datetime import timedelta
+            ayer = str((datetime.now() - timedelta(days=1)).date())
+            if not todos_tickets.empty:
+                df_tmp = todos_tickets.copy()
+                df_tmp["FECHA_APERTURA"] = pd.to_datetime(df_tmp["FECHA_APERTURA"], errors="coerce")
+                tickets_ayer = len(df_tmp[df_tmp["FECHA_APERTURA"].dt.date.astype(str) == ayer])
+            else:
+                tickets_ayer = 0
+            if tickets_ayer > 0:
+                delta = tickets_hoy - tickets_ayer
+                indicador_hoy = f"+{delta}" if delta >= 0 else str(delta)
+            elif tickets_hoy > 0:
+                indicador_hoy = "🆕"
+            else:
+                indicador_hoy = "—"
+        except Exception:
+            indicador_hoy = "—"
+
         # Técnicos disponibles
         tecnicos_disponibles = len(tecnicos[tecnicos["ESTADO"] == "Disponible"]) if not tecnicos.empty else 0
         total_tecnicos = len(tecnicos)
@@ -419,8 +449,8 @@ class PanelAdminIT:
                         Text("📈 Indicadores Clave de Desempeño (KPIs)", size=14, weight=FontWeight.BOLD, color=COLOR_ACENTO),
                         Container(height=10),
                         Row([
-                            self._kpi_card_v2("Tickets Hoy", str(tickets_hoy), icons.TODAY, COLOR_INFO, 
-                                            "+15%" if tickets_hoy > 5 else "-2%"),
+                            self._kpi_card_v2("Tickets Hoy", str(tickets_hoy), icons.TODAY, COLOR_INFO,
+                                            indicador_hoy),
                             self._kpi_card_v2("En Resolución", str(len(cola)), icons.PENDING_ACTIONS, COLOR_PRIMARIO, 
                                             "↑" if len(cola) > 3 else "↓"),
                             self._kpi_card_v2("Resueltos Hoy", str(resueltos_hoy), icons.CHECK_CIRCLE, COLOR_EXITO, 
@@ -1197,51 +1227,52 @@ class PanelAdminIT:
             return self._panel_vacio("Categorías")
     
     def _panel_distribucion_horaria(self, tickets: pd.DataFrame) -> Container:
-        """Panel mostrando distribución horaria de tickets."""
+        """Panel mostrando distribución horaria de tickets con datos reales."""
         try:
-            if tickets.empty:
-                return self._panel_vacio("Distribución Horaria")
-            
-            # Datos simulados de distribución por hora
-            horas = ["0-4", "4-8", "8-12", "12-16", "16-20", "20-24"]
-            cantidades = [8, 5, 28, 32, 35, 15]
-            max_val = max(cantidades) if cantidades else 40
-            
+            stats     = getattr(self, '_stats_dash', {})
+            horas     = stats.get("bloques_horarios", ["0-4","4-8","8-12","12-16","16-20","20-24"])
+            cantidades = stats.get("cantidades_horaria", [0]*6)
+
+            max_val     = max(cantidades) if any(c > 0 for c in cantidades) else 1
+            pico_cant   = max(cantidades)
+            pico_idx    = cantidades.index(pico_cant) if pico_cant > 0 else 0
+            pico_bloque = horas[pico_idx] if horas else "N/A"
+
             barras = []
             for hora, cant in zip(horas, cantidades):
-                altura = (cant / max_val * 100) if max_val > 0 else 20
+                altura = max((cant / max_val * 100), 4) if max_val > 0 else 4
+                es_pico = (cant == pico_cant and cant > 0)
                 barras.append(
                     Column([
                         Container(
-                            width=22,
-                            height=altura,
-                            bgcolor=COLOR_ACENTO,
+                            width=22, height=altura,
+                            bgcolor=COLOR_PRIMARIO if es_pico else COLOR_ACENTO,
                             border_radius=ft.BorderRadius.only(top_left=3, top_right=3)
                         ),
                         Text(str(cant), size=8, color=COLOR_TEXTO),
                         Text(hora, size=7, color=COLOR_TEXTO_SEC)
                     ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2)
                 )
-            
+
             return Container(
                 content=Column([
-                    Row([
-                        Text("⏰ Distribución Horaria", size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                    ]),
+                    Text("⏰ Distribución Horaria (Real)", size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                     Container(height=12),
                     Row(barras, alignment=MainAxisAlignment.SPACE_AROUND, spacing=2),
                     Container(height=8),
                     Row([
-                        Text("Pico: 16-20hs", size=9, color=COLOR_ACENTO, weight=FontWeight.BOLD),
-                        Text("▸ 35 tickets", size=9, color=COLOR_TEXTO_SEC)
-                    ], alignment=MainAxisAlignment.CENTER)
+                        Text(f"Pico: {pico_bloque}", size=9, color=COLOR_ACENTO, weight=FontWeight.BOLD),
+                        Text(f"▸ {pico_cant} tickets", size=9, color=COLOR_TEXTO_SEC)
+                    ], alignment=MainAxisAlignment.CENTER) if pico_cant > 0 else
+                    Text("Sin tickets registrados", size=9, color=COLOR_TEXTO_SEC, text_align=TextAlign.CENTER)
                 ], spacing=6),
                 bgcolor=COLOR_SUPERFICIE,
                 border_radius=15,
                 padding=16,
                 expand=True
             )
-        except:
+        except Exception as ex:
+            print(f"[HORARIA] {ex}")
             return self._panel_vacio("Horaria")
     
     def _panel_tickets_recientes_v2(self, tickets: pd.DataFrame) -> Container:
@@ -1386,69 +1417,54 @@ class PanelAdminIT:
             return self._panel_vacio(titulo)
     
     def _crear_heatmap_actividad(self) -> Container:
-        """Crea un heatmap de actividad semanal."""
+        """Crea un heatmap de actividad semanal con datos reales."""
         try:
-            # Matriz de 7 días x 6 periodos (4h cada uno)
-            dias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+            stats = getattr(self, '_stats_dash', {})
+            datos = stats.get("heatmap", [[0]*6 for _ in range(7)])
+
+            dias    = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
             periodos = ["0-4", "4-8", "8-12", "12-16", "16-20", "20-24"]
-            
-            # Datos simulados: intensidad de 0-10
-            datos = [
-                [2, 1, 8, 9, 10, 3],
-                [1, 2, 7, 10, 9, 2],
-                [1, 1, 9, 8, 8, 1],
-                [2, 2, 6, 10, 9, 2],
-                [1, 3, 8, 10, 10, 3],
-                [0, 0, 1, 2, 1, 0],
-                [0, 0, 0, 1, 1, 0]
-            ]
-            
+
             celdas = []
             for dia_idx, dia in enumerate(dias):
                 columna = []
-                for per_idx, periodo in enumerate(periodos):
-                    intensidad = datos[dia_idx][per_idx]
-                    # Escala de color según intensidad
+                for per_idx in range(6):
+                    intensidad = datos[dia_idx][per_idx] if dia_idx < len(datos) and per_idx < len(datos[dia_idx]) else 0
                     if intensidad == 0:
                         bg = COLOR_SUPERFICIE_2
                     elif intensidad <= 3:
-                        bg = "#1F3A5F"  # Azul débil
+                        bg = "#1F3A5F"
                     elif intensidad <= 6:
-                        bg = "#0F60A8"  # Azul medio
+                        bg = "#0F60A8"
                     elif intensidad <= 9:
-                        bg = COLOR_PRIMARIO  # Rojo fuerte
+                        bg = COLOR_PRIMARIO
                     else:
-                        bg = "#FF0000"  # Rojo muy intenso
-                    
+                        bg = "#FF0000"
                     columna.append(
                         Container(
-                            width=30,
-                            height=30,
-                            bgcolor=bg,
-                            border_radius=4,
+                            width=30, height=30, bgcolor=bg, border_radius=4,
                             alignment=ft.Alignment(0, 0),
                             content=Text(str(intensidad), size=9, color=COLOR_TEXTO, weight=FontWeight.BOLD)
                         )
                     )
-                
                 celdas.append(
                     Column([
                         Text(dia, size=10, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                         Column(columna, spacing=2)
                     ], spacing=4, horizontal_alignment=CrossAxisAlignment.CENTER)
                 )
-            
-            # Información de colores
-            leyenda_colores = Row([
-                Row([Container(width=8, height=8, bgcolor=COLOR_SUPERFICIE_2, border_radius=2), Text("Bajo", size=8, color=COLOR_TEXTO)], spacing=4),
-                Row([Container(width=8, height=8, bgcolor="#1F3A5F", border_radius=2), Text("Medio", size=8, color=COLOR_TEXTO)], spacing=4),
+
+            leyenda = Row([
+                Row([Container(width=8, height=8, bgcolor=COLOR_SUPERFICIE_2, border_radius=2), Text("Sin actividad", size=8, color=COLOR_TEXTO)], spacing=4),
+                Row([Container(width=8, height=8, bgcolor="#1F3A5F", border_radius=2), Text("Bajo", size=8, color=COLOR_TEXTO)], spacing=4),
+                Row([Container(width=8, height=8, bgcolor="#0F60A8", border_radius=2), Text("Medio", size=8, color=COLOR_TEXTO)], spacing=4),
                 Row([Container(width=8, height=8, bgcolor=COLOR_PRIMARIO, border_radius=2), Text("Alto", size=8, color=COLOR_TEXTO)], spacing=4),
-            ], spacing=12, alignment=MainAxisAlignment.CENTER)
-            
+            ], spacing=10, alignment=MainAxisAlignment.CENTER)
+
             return Container(
                 content=Column([
                     Row([
-                        Text("🔥 Mapa de Calor - Actividad Semanal", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text("🔥 Mapa de Calor — Actividad Real por Día/Hora", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                         Icon(icons.HEATMAP, size=16, color=COLOR_PRIMARIO)
                     ]),
                     Container(height=10),
@@ -1458,56 +1474,64 @@ class PanelAdminIT:
                     ], spacing=2),
                     Row(celdas, spacing=10, alignment=MainAxisAlignment.START),
                     Container(height=10),
-                    leyenda_colores
+                    leyenda
                 ], spacing=8),
                 bgcolor=COLOR_SUPERFICIE,
                 border_radius=15,
                 padding=14,
                 expand=True
             )
-        except:
+        except Exception as ex:
+            print(f"[HEATMAP] {ex}")
             return self._panel_vacio("Mapa de Calor")
     
     def _panel_analisis_sla_tecnicos(self, tecnicos: pd.DataFrame, tickets: pd.DataFrame) -> Container:
-        """Panel mostrando cumplimiento de SLA por técnico."""
+        """Panel mostrando cumplimiento de SLA real por técnico (tickets cerrados en <24h)."""
         try:
             if tecnicos.empty:
                 return self._panel_vacio("SLA por Técnico")
-            
+
+            stats    = getattr(self, '_stats_dash', {})
+            sla_data = stats.get("sla_tecnicos", {})
+
             items = []
             for _, tec in tecnicos.head(6).iterrows():
-                nombre = tec.get("NOMBRE", "N/A")
-                # SLA simulado
-                sla = 85 + (hash(nombre) % 15)  # 85-99%
-                estado_sla = "✓" if sla >= 90 else "⚠"
-                color_sla = COLOR_EXITO if sla >= 90 else COLOR_ADVERTENCIA
-                
+                nombre   = tec.get("NOMBRE", "N/A")
+                sla      = sla_data.get(nombre, None)
+
+                if sla is None:
+                    lbl_sla    = "Sin datos"
+                    estado_sla = "•"
+                    color_sla  = COLOR_TEXTO_SEC
+                    ancho_barra = 0
+                else:
+                    lbl_sla    = f"{sla}%"
+                    estado_sla = "✓" if sla >= 90 else "⚠"
+                    color_sla  = COLOR_EXITO if sla >= 90 else COLOR_ADVERTENCIA if sla >= 70 else COLOR_ERROR
+                    ancho_barra = int(150 * sla / 100)
+
                 items.append(
                     Row([
                         Text(nombre[:12], size=11, color=COLOR_TEXTO, width=100),
                         Container(
-                            width=150,
-                            height=14,
-                            bgcolor=COLOR_SUPERFICIE_2,
-                            border_radius=7,
+                            width=150, height=14, bgcolor=COLOR_SUPERFICIE_2, border_radius=7,
                             content=Container(
-                                width=150 * (sla / 100),
-                                height=14,
-                                bgcolor=color_sla,
-                                border_radius=7
+                                width=ancho_barra, height=14,
+                                bgcolor=color_sla, border_radius=7
                             )
                         ),
                         Row([
-                            Text(str(sla) + "%", size=10, color=color_sla, weight=FontWeight.BOLD, width=35),
+                            Text(lbl_sla, size=10, color=color_sla, weight=FontWeight.BOLD, width=55),
                             Text(estado_sla, size=12, color=color_sla)
-                        ], spacing=0, width=50)
+                        ], spacing=0, width=65)
                     ], spacing=8)
                 )
-            
+
             return Container(
                 content=Column([
                     Row([
-                        Text("✓ Cumplimiento SLA por Técnico", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text("✓ SLA Real por Técnico", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text("(cerrado < 24h = cumple)", size=9, color=COLOR_TEXTO_SEC)
                     ]),
                     Divider(height=1, color=COLOR_SUPERFICIE_2),
                     Container(height=8),
@@ -1518,79 +1542,60 @@ class PanelAdminIT:
                 padding=14,
                 expand=True
             )
-        except:
+        except Exception as ex:
+            print(f"[SLA] {ex}")
             return self._panel_vacio("SLA")
     
     def _panel_tiempo_resolucion(self, tickets: pd.DataFrame) -> Container:
-        """Panel mostrando análisis de tiempo de resolución."""
+        """Panel mostrando análisis real de tiempo de resolución."""
         try:
-            if tickets.empty:
-                return self._panel_vacio("Tiempo de Resolución")
-            
-            # Estadísticas de tiempo
-            cerrados = tickets[tickets.get("ESTADO") == "Cerrado"]
-            
-            # Simulación de tiempos
-            tiempo_minimo = 2.5  # horas
-            tiempo_maximo = 48.0  # horas
-            tiempo_promedio = 12.3  # horas
-            tiempo_mediano = 11.0  # horas
-            
-            # Distribución simulada
-            distribucion = {
-                "< 4h": 15,
-                "4-8h": 22,
-                "8-24h": 35,
-                "24-48h": 18,
-                "> 48h": 10
-            }
-            
+            stats  = getattr(self, '_stats_dash', {})
+            t_min  = stats.get("t_min", 0)
+            t_max  = stats.get("t_max", 0)
+            t_prom = stats.get("t_prom", 0)
+            t_med  = stats.get("t_median", 0)
+            dist   = stats.get("dist_tiempos", {"< 4h": 0, "4-8h": 0, "8-24h": 0, "24-48h": 0, "> 48h": 0})
+
+            hay_datos = any(v > 0 for v in dist.values())
+            max_dist  = max(dist.values()) if hay_datos else 1
+
             items = []
-            for rango, cantidad in distribucion.items():
+            for rango, cantidad in dist.items():
                 color = {
-                    "< 4h": COLOR_EXITO,
-                    "4-8h": COLOR_DISPONIBLE,
-                    "8-24h": COLOR_ACENTO,
+                    "< 4h":   COLOR_EXITO,
+                    "4-8h":   COLOR_DISPONIBLE,
+                    "8-24h":  COLOR_ACENTO,
                     "24-48h": COLOR_ADVERTENCIA,
-                    "> 48h": COLOR_ERROR
+                    "> 48h":  COLOR_ERROR
                 }.get(rango, COLOR_TEXTO_SEC)
-                
-                ancho = cantidad / 35 * 200
+                ancho = max(int(cantidad / max_dist * 200), 4) if max_dist > 0 and cantidad > 0 else 0
                 items.append(
                     Row([
                         Text(rango, size=10, color=COLOR_TEXTO, width=60),
-                        Container(
-                            width=ancho,
-                            height=16,
-                            bgcolor=color,
-                            border_radius=4
-                        ),
+                        Container(width=ancho, height=16, bgcolor=color, border_radius=4),
                         Text(str(cantidad), size=10, color=COLOR_ACENTO, weight=FontWeight.BOLD, width=30)
                     ], spacing=8)
                 )
-            
+
             return Container(
                 content=Column([
-                    Text("⏱️ Tiempo de Resolución", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    Text("⏱️ Tiempo de Resolución (Real)", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                     Container(height=8),
                     Row([
-                        Column([
-                            Text("Mínimo", size=9, color=COLOR_TEXTO_SEC),
-                            Text(f"{tiempo_minimo}h", size=12, weight=FontWeight.BOLD, color=COLOR_EXITO)
-                        ], spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER),
-                        Column([
-                            Text("Mediano", size=9, color=COLOR_TEXTO_SEC),
-                            Text(f"{tiempo_mediano}h", size=12, weight=FontWeight.BOLD, color=COLOR_ACENTO)
-                        ], spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER),
-                        Column([
-                            Text("Promedio", size=9, color=COLOR_TEXTO_SEC),
-                            Text(f"{tiempo_promedio}h", size=12, weight=FontWeight.BOLD, color=COLOR_TEXTO)
-                        ], spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER),
-                        Column([
-                            Text("Máximo", size=9, color=COLOR_TEXTO_SEC),
-                            Text(f"{tiempo_maximo}h", size=12, weight=FontWeight.BOLD, color=COLOR_ERROR)
-                        ], spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER)
-                    ], alignment=MainAxisAlignment.SPACE_AROUND),
+                        Column([Text("Mínimo", size=9, color=COLOR_TEXTO_SEC),
+                                Text(f"{t_min}h" if t_min else "N/D", size=13, weight=FontWeight.BOLD, color=COLOR_EXITO)],
+                               spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER),
+                        Column([Text("Mediano", size=9, color=COLOR_TEXTO_SEC),
+                                Text(f"{t_med}h" if t_med else "N/D", size=13, weight=FontWeight.BOLD, color=COLOR_ACENTO)],
+                               spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER),
+                        Column([Text("Promedio", size=9, color=COLOR_TEXTO_SEC),
+                                Text(f"{t_prom}h" if t_prom else "N/D", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO)],
+                               spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER),
+                        Column([Text("Máximo", size=9, color=COLOR_TEXTO_SEC),
+                                Text(f"{t_max}h" if t_max else "N/D", size=13, weight=FontWeight.BOLD, color=COLOR_ERROR)],
+                               spacing=2, horizontal_alignment=CrossAxisAlignment.CENTER),
+                    ], alignment=MainAxisAlignment.SPACE_AROUND) if hay_datos else
+                    Text("Sin tickets cerrados aún", size=11, color=COLOR_TEXTO_SEC, text_align=TextAlign.CENTER),
                     Container(height=12),
                     Column(items, spacing=8)
                 ], spacing=8),
@@ -1599,55 +1604,65 @@ class PanelAdminIT:
                 padding=14,
                 expand=True
             )
-        except:
+        except Exception as ex:
+            print(f"[TIEMPOS] {ex}")
             return self._panel_vacio("Tiempos")
     
     def _panel_prediccion_carga(self) -> Container:
-        """Panel con predicción de carga próximas horas."""
+        """Panel con predicción de carga: promedio histórico real por hora."""
         try:
-            # Predicción simulada
-            horas = ["14:00", "15:00", "16:00", "17:00", "18:00", "19:00"]
-            predicciones = [8, 12, 18, 22, 20, 15]
-            max_pred = max(predicciones)
-            
+            stats      = getattr(self, '_stats_dash', {})
+            horas_pred = stats.get("horas_pred", [])
+            vals_pred  = stats.get("vals_pred", [])
+
+            if not horas_pred or not any(v > 0 for v in vals_pred):
+                return Container(
+                    content=Column([
+                        Text("🔮 Predicción de Carga", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Container(height=16),
+                        Icon(icons.INFO_OUTLINE, size=30, color=COLOR_TEXTO_SEC),
+                        Text("Sin suficiente histórico para predecir",
+                             size=10, color=COLOR_TEXTO_SEC, text_align=TextAlign.CENTER)
+                    ], spacing=6, horizontal_alignment=CrossAxisAlignment.CENTER),
+                    bgcolor=COLOR_SUPERFICIE, border_radius=15, padding=14, expand=True,
+                    alignment=ft.Alignment(0, 0)
+                )
+
+            max_pred = max(vals_pred)
             barras = []
-            for hora, pred in zip(horas, predicciones):
-                altura = (pred / max_pred * 100) if max_pred > 0 else 20
-                color = COLOR_ERROR if pred > 20 else COLOR_ADVERTENCIA if pred > 15 else COLOR_ACENTO
-                
+            for hora, pred in zip(horas_pred, vals_pred):
+                altura = max((pred / max_pred * 100), 4) if max_pred > 0 else 4
+                color  = COLOR_ERROR if pred > max_pred * 0.8 else COLOR_ADVERTENCIA if pred > max_pred * 0.5 else COLOR_ACENTO
                 barras.append(
                     Column([
                         Container(
-                            width=25,
-                            height=altura,
-                            bgcolor=color,
+                            width=25, height=altura, bgcolor=color,
                             border_radius=ft.BorderRadius.only(top_left=3, top_right=3)
                         ),
-                        Text(str(pred), size=9, color=COLOR_TEXTO),
+                        Text(f"{pred:.1f}", size=9, color=COLOR_TEXTO),
                         Text(hora, size=8, color=COLOR_TEXTO_SEC)
                     ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=2)
                 )
-            
+
             return Container(
                 content=Column([
                     Row([
-                        Text("🔮 Predicción de Carga", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text("🔮 Predicción de Carga (Próx. 6h)", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                         Icon(icons.TRENDING_UP, size=16, color=COLOR_PRIMARIO)
                     ]),
                     Container(height=12),
                     Row(barras, alignment=MainAxisAlignment.SPACE_AROUND, spacing=2),
                     Container(height=10),
-                    Row([
-                        Text("Predicción basada en histórico", size=8, color=COLOR_TEXTO_SEC),
-                        Text("Actualización: Cada 15 min", size=8, color=COLOR_ACENTO)
-                    ], alignment=MainAxisAlignment.SPACE_BETWEEN)
+                    Text("Promedio histórico real por hora del día",
+                         size=8, color=COLOR_TEXTO_SEC, text_align=TextAlign.CENTER)
                 ], spacing=8),
                 bgcolor=COLOR_SUPERFICIE,
                 border_radius=15,
                 padding=14,
                 expand=True
             )
-        except:
+        except Exception as ex:
+            print(f"[PREDICCION] {ex}")
             return self._panel_vacio("Predicción")
     
     # =========================================================================
@@ -2482,131 +2497,509 @@ class PanelAdminIT:
         self._refrescar_vista()
     
     # =========================================================================
+    # VISTA: BÚSQUEDA GLOBAL
+    # =========================================================================
+
+    def _vista_busqueda_global(self) -> Column:
+        """Vista de búsqueda global en tickets, equipos y técnicos."""
+        txt_query = ft.TextField(
+            label="Buscar en toda la base de datos...",
+            prefix_icon=icons.SEARCH,
+            width=500,
+            autofocus=True,
+            bgcolor=COLOR_SUPERFICIE_2,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            border_radius=12,
+        )
+        lbl_estado     = Text("", size=12, color=COLOR_TEXTO_SEC)
+        contenedor_res = Container(expand=True)
+
+        def _hacer_busqueda(e=None):
+            q = (txt_query.value or "").strip()
+            if len(q) < 2:
+                lbl_estado.value = "Escribe al menos 2 caracteres."
+                contenedor_res.content = None
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+                return
+
+            lbl_estado.value = "Buscando..."
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+            res = self.gestor.buscar_global(q)
+            tickets_res  = res.get("tickets", [])
+            equipos_res  = res.get("equipos", [])
+            tecnicos_res = res.get("tecnicos", [])
+
+            total = len(tickets_res) + len(equipos_res) + len(tecnicos_res)
+            lbl_estado.value = f"{total} resultado(s) para «{q}»"
+
+            secciones = []
+
+            # ─── Tickets ───────────────────────────────────────────────
+            if tickets_res:
+                filas_t = []
+                for t in tickets_res:
+                    est  = t.get("ESTADO", "")
+                    col  = {"Abierto": COLOR_ADVERTENCIA, "En Cola": COLOR_INFO,
+                            "En Proceso": COLOR_PRIMARIO, "Cerrado": COLOR_EXITO}.get(est, COLOR_TEXTO_SEC)
+                    fa   = str(t.get("FECHA_APERTURA", ""))[:16]
+                    filas_t.append(
+                        DataRow(cells=[
+                            DataCell(Text(f"#{t.get('ID_TICKET','')}", weight=FontWeight.BOLD, color=COLOR_ACENTO, size=12)),
+                            DataCell(Text(str(t.get("USUARIO_AD",""))[:20], size=12, color=COLOR_TEXTO)),
+                            DataCell(Text(str(t.get("CATEGORIA",""))[:15], size=12, color=COLOR_TEXTO)),
+                            DataCell(Container(
+                                content=Text(est, size=9, color=colors.WHITE, weight=FontWeight.BOLD),
+                                bgcolor=col, padding=ft.Padding.symmetric(horizontal=8, vertical=3), border_radius=4
+                            )),
+                            DataCell(Text(str(t.get("TECNICO_ASIGNADO",""))[:15], size=11, color=COLOR_TEXTO_SEC)),
+                            DataCell(Text(fa, size=11, color=COLOR_TEXTO_SEC)),
+                        ], on_select_change=lambda e, tk=t: self._mostrar_detalle_ticket(tk))
+                    )
+                secciones.append(Container(
+                    content=Column([
+                        Row([Icon(icons.CONFIRMATION_NUMBER, size=18, color=COLOR_INFO),
+                             Text(f"Tickets ({len(tickets_res)})", size=13, weight=FontWeight.BOLD, color=COLOR_INFO)]),
+                        Column([Row([DataTable(
+                            columns=[
+                                DataColumn(Text("ID",        weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Usuario",   weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Categoría", weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Estado",    weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Técnico",   weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Fecha",     weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                            ],
+                            rows=filas_t,
+                            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+                            border_radius=8,
+                            heading_row_color=COLOR_SUPERFICIE_2,
+                            show_checkbox_column=False,
+                            column_spacing=15
+                        )], scroll=ScrollMode.AUTO)], scroll=ScrollMode.AUTO, height=220),
+                    ], spacing=10),
+                    bgcolor=COLOR_SUPERFICIE,
+                    border_radius=12,
+                    padding=16,
+                    border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+                ))
+
+            # ─── Equipos ───────────────────────────────────────────────
+            if equipos_res:
+                filas_e = []
+                for eq in equipos_res:
+                    filas_e.append(DataRow(cells=[
+                        DataCell(Text(str(eq.get("MAC_ADDRESS",""))[:18], size=12, color=COLOR_ACENTO)),
+                        DataCell(Text(str(eq.get("NOMBRE_EQUIPO",""))[:20], size=12, color=COLOR_TEXTO)),
+                        DataCell(Text(str(eq.get("HOSTNAME",""))[:18], size=12, color=COLOR_TEXTO)),
+                        DataCell(Text(str(eq.get("USUARIO_ASIGNADO",""))[:20], size=12, color=COLOR_TEXTO)),
+                        DataCell(Text(str(eq.get("GRUPO",""))[:15], size=12, color=COLOR_TEXTO)),
+                        DataCell(Text(str(eq.get("ESTADO_EQUIPO",""))[:12], size=11, color=COLOR_TEXTO_SEC)),
+                    ], on_select_change=lambda e, m=eq.get("MAC_ADDRESS",""): self._dialogo_editar_equipo(m) if m else None))
+
+                secciones.append(Container(
+                    content=Column([
+                        Row([Icon(icons.COMPUTER, size=18, color=COLOR_EXITO),
+                             Text(f"Equipos ({len(equipos_res)})", size=13, weight=FontWeight.BOLD, color=COLOR_EXITO)]),
+                        Column([Row([DataTable(
+                            columns=[
+                                DataColumn(Text("MAC",       weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Nombre",    weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Hostname",  weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Usuario",   weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Grupo",     weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                                DataColumn(Text("Estado",    weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=11)),
+                            ],
+                            rows=filas_e,
+                            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+                            border_radius=8,
+                            heading_row_color=COLOR_SUPERFICIE_2,
+                            show_checkbox_column=False,
+                            column_spacing=15
+                        )], scroll=ScrollMode.AUTO)], scroll=ScrollMode.AUTO, height=200),
+                    ], spacing=10),
+                    bgcolor=COLOR_SUPERFICIE,
+                    border_radius=12,
+                    padding=16,
+                    border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+                ))
+
+            # ─── Técnicos ──────────────────────────────────────────────
+            if tecnicos_res:
+                items_tec = []
+                for tec in tecnicos_res:
+                    estado_col = {
+                        "Disponible": COLOR_DISPONIBLE, "Ocupado": COLOR_OCUPADO,
+                        "Ausente": COLOR_AUSENTE, "En Descanso": COLOR_DESCANSO
+                    }.get(tec.get("ESTADO",""), COLOR_TEXTO_SEC)
+                    items_tec.append(Container(
+                        content=Row([
+                            Container(
+                                content=Text(tec.get("NOMBRE","?")[:2].upper(), size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                width=38, height=38, bgcolor=COLOR_SUPERFICIE_3,
+                                border_radius=20, alignment=ft.Alignment(0, 0)
+                            ),
+                            Column([
+                                Text(tec.get("NOMBRE",""), size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                Text(tec.get("ESPECIALIDAD",""), size=11, color=COLOR_TEXTO_SEC),
+                                Text(tec.get("EMAIL",""), size=10, color=COLOR_ACENTO),
+                            ], spacing=2, expand=True),
+                            Container(
+                                content=Text(tec.get("ESTADO",""), size=10, color=colors.WHITE, weight=FontWeight.BOLD),
+                                bgcolor=estado_col, padding=ft.Padding.symmetric(horizontal=10, vertical=4), border_radius=6
+                            )
+                        ], spacing=12),
+                        padding=10,
+                        border=ft.Border(bottom=ft.BorderSide(1, COLOR_SUPERFICIE_2))
+                    ))
+                secciones.append(Container(
+                    content=Column([
+                        Row([Icon(icons.ENGINEERING, size=18, color=COLOR_ADVERTENCIA),
+                             Text(f"Técnicos ({len(tecnicos_res)})", size=13, weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA)]),
+                        Column(items_tec, spacing=0)
+                    ], spacing=10),
+                    bgcolor=COLOR_SUPERFICIE,
+                    border_radius=12,
+                    padding=16,
+                    border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+                ))
+
+            if not secciones:
+                secciones.append(Container(
+                    content=Column([
+                        Icon(icons.SEARCH_OFF, size=50, color=COLOR_TEXTO_SEC),
+                        Text(f"Sin resultados para «{q}»", size=15, color=COLOR_TEXTO_SEC)
+                    ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=10),
+                    padding=40, alignment=ft.Alignment(0, 0)
+                ))
+
+            contenedor_res.content = Column(secciones, spacing=16, scroll=ScrollMode.AUTO, expand=True)
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        txt_query.on_submit = _hacer_busqueda
+
+        return Column([
+            # Header
+            Container(
+                content=Row([
+                    Container(
+                        content=Icon(icons.MANAGE_SEARCH, size=28, color=colors.WHITE),
+                        bgcolor=COLOR_PRIMARIO, padding=12, border_radius=12
+                    ),
+                    Column([
+                        Text("Búsqueda Global", size=22, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text("Busca en tickets, equipos y técnicos simultáneamente",
+                             size=12, color=COLOR_TEXTO_SEC)
+                    ], spacing=2, expand=True),
+                ], spacing=16),
+                bgcolor=COLOR_SUPERFICIE,
+                padding=20, border_radius=14,
+                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+            ),
+
+            Container(height=16),
+
+            # Barra de búsqueda
+            Container(
+                content=Row([
+                    txt_query,
+                    ft.FilledButton(
+                        "Buscar", icon=icons.SEARCH,
+                        bgcolor=COLOR_PRIMARIO,
+                        on_click=_hacer_busqueda
+                    ),
+                    lbl_estado
+                ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                bgcolor=COLOR_SUPERFICIE,
+                padding=16, border_radius=12,
+                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+            ),
+
+            Container(height=16),
+
+            # Resultados
+            contenedor_res,
+
+        ], scroll=ScrollMode.AUTO, expand=True)
+
+    # =========================================================================
     # VISTA: HISTORIAL
     # =========================================================================
-    
+
     def _vista_historial(self) -> Column:
-        """Vista del historial de tickets cerrados con auditoría y análisis."""
-        historial = self.gestor.obtener_historial()
+        """Vista del historial de tickets cerrados con filtros y auditoría."""
+        historial_completo = self.gestor.obtener_historial()
         todos = self.gestor.obtener_todos_tickets()
-        
-        # ============ PANEL DE AUDITORÍA ============
-        panel_auditoria = self._construir_panel_auditoria(todos)
-        
-        # ============ TABLA DE HISTORIAL ============
-        filas = []
-        for _, row in historial.iterrows():
-            fecha_apertura = row.get("FECHA_APERTURA", "")
-            fecha_cierre = row.get("FECHA_CIERRE", "")
-            
-            # Formatear fechas
-            if pd.notna(fecha_apertura) and hasattr(fecha_apertura, 'strftime'):
-                fecha_apertura = fecha_apertura.strftime("%d/%m/%Y %H:%M")
-            else:
-                fecha_apertura = str(fecha_apertura)[:16] if fecha_apertura else "-"
-            
-            if pd.notna(fecha_cierre) and hasattr(fecha_cierre, 'strftime'):
-                fecha_cierre = fecha_cierre.strftime("%d/%m/%Y %H:%M")
-            else:
-                fecha_cierre = str(fecha_cierre)[:16] if fecha_cierre else "-"
-            
-            filas.append(
-                DataRow(
-                    cells=[
-                        DataCell(Text(f"#{row.get('ID_TICKET', '')}", weight=FontWeight.BOLD, color=COLOR_ACENTO)),
-                        DataCell(Text(str(row.get('TURNO', '-')), color=COLOR_TEXTO)),
-                        DataCell(Text(str(row.get('USUARIO_AD', ''))[:15], color=COLOR_TEXTO)),
-                        DataCell(Text(str(row.get('CATEGORIA', '')), color=COLOR_TEXTO)),
-                        DataCell(Text(str(row.get('TECNICO_ASIGNADO', '-'))[:15], color=COLOR_TEXTO)),
-                        DataCell(Text(fecha_apertura, size=11, color=COLOR_TEXTO_SEC)),
-                        DataCell(Text(fecha_cierre, size=11, color=COLOR_TEXTO_SEC)),
-                    ],
-                    on_select_change=lambda e, t=row: self._mostrar_detalle_historial(t.to_dict())
-                )
-            )
-        
-        tabla_historial = DataTable(
-            columns=[
-                DataColumn(Text("ID", weight=FontWeight.BOLD, color=COLOR_PRIMARIO)),
-                DataColumn(Text("Turno", weight=FontWeight.BOLD, color=COLOR_PRIMARIO)),
-                DataColumn(Text("Usuario", weight=FontWeight.BOLD, color=COLOR_PRIMARIO)),
-                DataColumn(Text("Categoría", weight=FontWeight.BOLD, color=COLOR_PRIMARIO)),
-                DataColumn(Text("Técnico", weight=FontWeight.BOLD, color=COLOR_PRIMARIO)),
-                DataColumn(Text("Apertura", weight=FontWeight.BOLD, color=COLOR_PRIMARIO)),
-                DataColumn(Text("Cierre", weight=FontWeight.BOLD, color=COLOR_PRIMARIO)),
-            ],
-            rows=filas,
-            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
-            border_radius=ft.BorderRadius.all(10),
-            heading_row_color=COLOR_SUPERFICIE_2,
-            show_checkbox_column=False,
-            column_spacing=20
+
+        # Opciones reales para los filtros (vacío = Todas)
+        cats_opciones     = ["Todas"] + sorted(historial_completo["CATEGORIA"].dropna().unique().tolist()) if not historial_completo.empty else ["Todas"]
+        tecnicos_opciones = ["Todos"] + sorted(historial_completo["TECNICO_ASIGNADO"].replace("", pd.NA).dropna().unique().tolist()) if not historial_completo.empty else ["Todos"]
+
+        # Controles de filtro
+        dd_categoria = ft.Dropdown(
+            label="Categoría",
+            value="Todas",
+            options=[ft.dropdown.Option(c) for c in cats_opciones],
+            width=160,
+            bgcolor=COLOR_SUPERFICIE_2,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
         )
-        
+        dd_tecnico = ft.Dropdown(
+            label="Técnico",
+            value="Todos",
+            options=[ft.dropdown.Option(t) for t in tecnicos_opciones],
+            width=180,
+            bgcolor=COLOR_SUPERFICIE_2,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+        txt_fecha_desde = ft.TextField(
+            label="Desde (dd/mm/aaaa)",
+            width=160,
+            hint_text="01/01/2025",
+            bgcolor=COLOR_SUPERFICIE_2,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+        txt_fecha_hasta = ft.TextField(
+            label="Hasta (dd/mm/aaaa)",
+            width=160,
+            hint_text="31/12/2025",
+            bgcolor=COLOR_SUPERFICIE_2,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+        txt_buscar = ft.TextField(
+            label="Buscar usuario/ID...",
+            width=200,
+            prefix_icon=icons.SEARCH,
+            bgcolor=COLOR_SUPERFICIE_2,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+        lbl_resultados = Text("", size=11, color=COLOR_TEXTO_SEC)
+
+        # Contenedor dinámico para la tabla
+        self._hist_tabla_container = Container(
+            content=self._construir_tabla_historial(historial_completo),
+            bgcolor=COLOR_SUPERFICIE,
+            border_radius=10,
+            padding=10,
+            expand=True
+        )
+
+        def aplicar_filtros(e=None):
+            df = historial_completo.copy()
+
+            # Filtro categoría
+            if dd_categoria.value and dd_categoria.value != "Todas":
+                df = df[df["CATEGORIA"] == dd_categoria.value]
+
+            # Filtro técnico
+            if dd_tecnico.value and dd_tecnico.value != "Todos":
+                df = df[df["TECNICO_ASIGNADO"] == dd_tecnico.value]
+
+            # Filtro búsqueda texto
+            if txt_buscar.value and txt_buscar.value.strip():
+                q = txt_buscar.value.strip().lower()
+                mask = (
+                    df["USUARIO_AD"].str.lower().str.contains(q, na=False) |
+                    df["ID_TICKET"].str.lower().str.contains(q, na=False)   |
+                    df.get("HOSTNAME", pd.Series(dtype=str)).str.lower().str.contains(q, na=False)
+                )
+                df = df[mask]
+
+            # Filtro fechas
+            try:
+                if txt_fecha_desde.value and txt_fecha_desde.value.strip():
+                    date_desde = datetime.strptime(txt_fecha_desde.value.strip(), "%d/%m/%Y")
+                    df = df[df["FECHA_APERTURA"] >= pd.Timestamp(date_desde)]
+                if txt_fecha_hasta.value and txt_fecha_hasta.value.strip():
+                    date_hasta = datetime.strptime(txt_fecha_hasta.value.strip(), "%d/%m/%Y")
+                    df = df[df["FECHA_APERTURA"] <= pd.Timestamp(date_hasta.replace(hour=23, minute=59))]
+            except ValueError:
+                pass
+
+            lbl_resultados.value = f"{len(df)} resultado(s)"
+            self._hist_tabla_container.content = self._construir_tabla_historial(df)
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        def limpiar_filtros(e=None):
+            dd_categoria.value    = "Todas"
+            dd_tecnico.value      = "Todos"
+            txt_fecha_desde.value = ""
+            txt_fecha_hasta.value = ""
+            txt_buscar.value      = ""
+            lbl_resultados.value  = ""
+            self._hist_tabla_container.content = self._construir_tabla_historial(historial_completo)
+            try:
+                self.page.update()
+            except Exception:
+                pass
+
+        for ctrl in [dd_categoria, dd_tecnico, txt_fecha_desde, txt_fecha_hasta, txt_buscar]:
+            ctrl.on_change = aplicar_filtros
+
+        panel_auditoria = self._construir_panel_auditoria(todos)
+
         return Column([
+            # ── Header ────────────────────────────────────────────────
             Row([
                 Text("📚 Historial y Auditoría", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                 Container(
                     content=Row([
                         Icon(icons.LOCK, color=COLOR_TEXTO_SEC, size=16),
-                        Text(f"{len(historial)} tickets cerrados", color=COLOR_TEXTO_SEC)
+                        Text(f"{len(historial_completo)} tickets cerrados", color=COLOR_TEXTO_SEC)
                     ], spacing=5),
                     bgcolor=COLOR_SUPERFICIE,
                     padding=ft.Padding.symmetric(horizontal=15, vertical=8),
-                    border_radius=ft.BorderRadius.all(20)
+                    border_radius=20
                 )
             ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-            
+
             Container(height=10),
-            
-            # Panel de auditoría (análisis de problemas)
+
+            # ── Panel auditoría ────────────────────────────────────────
             panel_auditoria,
-            
+
             Container(height=15),
-            
-            # Mensaje informativo
+
+            # ── Filtros ────────────────────────────────────────────────
+            Container(
+                content=Column([
+                    Row([
+                        Icon(icons.FILTER_LIST, size=18, color=COLOR_ACENTO),
+                        Text("Filtros", size=13, weight=FontWeight.BOLD, color=COLOR_ACENTO)
+                    ], spacing=8),
+                    Row([
+                        dd_categoria,
+                        dd_tecnico,
+                        txt_buscar,
+                        txt_fecha_desde,
+                        txt_fecha_hasta,
+                        ft.IconButton(
+                            icon=icons.SEARCH, bgcolor=COLOR_PRIMARIO,
+                            icon_color=colors.WHITE, tooltip="Aplicar filtros",
+                            on_click=aplicar_filtros
+                        ),
+                        ft.IconButton(
+                            icon=icons.CLEAR_ALL, bgcolor=COLOR_SUPERFICIE_2,
+                            icon_color=COLOR_TEXTO_SEC, tooltip="Limpiar filtros",
+                            on_click=limpiar_filtros
+                        ),
+                        lbl_resultados
+                    ], spacing=10, wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                ], spacing=10),
+                bgcolor=COLOR_SUPERFICIE,
+                border_radius=10,
+                padding=16,
+                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+            ),
+
+            Container(height=12),
+
+            # ── Aviso readonly ─────────────────────────────────────────
             Container(
                 content=Row([
                     Icon(icons.INFO, color=COLOR_INFO),
-                    Text(
-                        "Los tickets cerrados no pueden ser editados ni eliminados. Esta sección es solo de lectura.",
-                        color=COLOR_TEXTO_SEC, size=13
-                    )
-                ], spacing=15),
+                    Text("Los tickets cerrados no pueden editarse. Solo lectura.",
+                         color=COLOR_TEXTO_SEC, size=12)
+                ], spacing=12),
                 bgcolor=COLOR_SUPERFICIE,
-                padding=15,
-                border_radius=ft.BorderRadius.all(10)
+                padding=12,
+                border_radius=8
             ),
-            
-            Container(height=15),
-            
-            # Tabla de historial con scroll
-            Container(
-                content=Column(
-                    controls=[Row(controls=[tabla_historial], scroll=ScrollMode.AUTO)],
-                    scroll=ScrollMode.AUTO,
-                ) if filas else Container(
-                    content=Column([
-                        Icon(icons.FOLDER_OPEN, size=60, color=COLOR_TEXTO_SEC),
-                        Text("No hay tickets en el historial", size=18, color=COLOR_TEXTO_SEC),
-                        Text("Los tickets cerrados aparecerán aquí", color=COLOR_TEXTO_SEC)
-                    ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=10),
-                    padding=50,
-                    alignment=ft.Alignment(0, 0)
-                ),
-                bgcolor=COLOR_SUPERFICIE,
-                border_radius=ft.BorderRadius.all(10),
-                padding=10,
-                expand=True
-            )
+
+            Container(height=12),
+
+            # ── Tabla dinámica ─────────────────────────────────────────
+            self._hist_tabla_container,
+
         ], scroll=ScrollMode.AUTO, expand=True)
-    
+
+    def _construir_tabla_historial(self, historial: pd.DataFrame) -> ft.Control:
+        """Construye la tabla del historial con los datos proporcionados."""
+        if historial.empty:
+            return Container(
+                content=Column([
+                    Icon(icons.FOLDER_OPEN, size=60, color=COLOR_TEXTO_SEC),
+                    Text("Sin resultados con los filtros aplicados", size=16, color=COLOR_TEXTO_SEC),
+                ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=10),
+                padding=40, alignment=ft.Alignment(0, 0)
+            )
+
+        filas = []
+        for _, row in historial.iterrows():
+            fa = row.get("FECHA_APERTURA", "")
+            fc = row.get("FECHA_CIERRE", "")
+            fa = fa.strftime("%d/%m/%Y %H:%M") if hasattr(fa, "strftime") else (str(fa)[:16] if fa and str(fa) != "nan" else "-")
+            fc = fc.strftime("%d/%m/%Y %H:%M") if hasattr(fc, "strftime") else (str(fc)[:16] if fc and str(fc) != "nan" else "-")
+
+            estado = str(row.get("ESTADO", "Cerrado"))
+            color_estado = COLOR_EXITO if estado == "Cerrado" else COLOR_ERROR
+            filas.append(
+                DataRow(
+                    cells=[
+                        DataCell(Text(f"#{row.get('ID_TICKET', '')}", weight=FontWeight.BOLD, color=COLOR_ACENTO, size=12)),
+                        DataCell(Text(str(row.get('TURNO', '-')), color=COLOR_TEXTO, size=12)),
+                        DataCell(Text(str(row.get('USUARIO_AD', ''))[:20], color=COLOR_TEXTO, size=12)),
+                        DataCell(Text(str(row.get('CATEGORIA', '')), color=COLOR_TEXTO, size=12)),
+                        DataCell(Text(str(row.get('PRIORIDAD', '-')), color=COLOR_TEXTO, size=12)),
+                        DataCell(Text(str(row.get('TECNICO_ASIGNADO', '-'))[:18], color=COLOR_TEXTO, size=12)),
+                        DataCell(Text(fa, size=11, color=COLOR_TEXTO_SEC)),
+                        DataCell(Text(fc, size=11, color=COLOR_TEXTO_SEC)),
+                        DataCell(
+                            Container(
+                                content=Text(estado, size=9, color=colors.WHITE, weight=FontWeight.BOLD),
+                                bgcolor=color_estado,
+                                padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                                border_radius=4
+                            )
+                        ),
+                    ],
+                    on_select_change=lambda e, t=row: self._mostrar_detalle_historial(t.to_dict())
+                )
+            )
+
+        tabla = DataTable(
+            columns=[
+                DataColumn(Text("ID",         weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Turno",      weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Usuario",    weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Categoría",  weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Prioridad",  weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Técnico",    weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Apertura",   weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Cierre",     weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+                DataColumn(Text("Estado",     weight=FontWeight.BOLD, color=COLOR_PRIMARIO, size=12)),
+            ],
+            rows=filas,
+            border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            border_radius=10,
+            heading_row_color=COLOR_SUPERFICIE_2,
+            show_checkbox_column=False,
+            column_spacing=18
+        )
+        return Column(
+            controls=[Row(controls=[tabla], scroll=ScrollMode.AUTO)],
+            scroll=ScrollMode.AUTO,
+        )
+
     def _construir_panel_auditoria(self, tickets: pd.DataFrame) -> Container:
-        """Construye panel de auditoría con análisis de equipos/usuarios más problemáticos."""
         try:
-            if tickets.empty:
-                return Container()
-            
             # === TOP USUARIOS MÁS PROBLEMÁTICOS ===
             usuarios_count = tickets["USUARIO_AD"].value_counts().head(5)
             items_usuarios = []
@@ -2949,10 +3342,18 @@ class PanelAdminIT:
                         bgcolor=COLOR_SUPERFICIE_2,
                         padding=12,
                         border_radius=10
-                    )
+                    ),
+
+                    # Log de cambios
+                    Row([
+                        Icon(icons.HISTORY, size=16, color=COLOR_INFO),
+                        Text("Histórico de Cambios", weight=FontWeight.BOLD, color=COLOR_INFO)
+                    ], spacing=8),
+                    self._construir_log_ticket(ticket.get("ID_TICKET", "")),
+
                 ], spacing=10, scroll=ScrollMode.AUTO),
                 width=460,
-                height=480,
+                height=520,
                 padding=5
             ),
             actions=[
@@ -4068,10 +4469,17 @@ class PanelAdminIT:
                         Text("Actualizar Ticket", weight=FontWeight.BOLD, color=COLOR_ACENTO)
                     ], spacing=8),
                     dd_estado,
-                    txt_notas
-                ], spacing=12, scroll=ScrollMode.AUTO),
-                width=420,
-                height=480,
+                    txt_notas,
+
+                    Divider(color=COLOR_BORDE),
+
+                    # ── Log de cambios ──────────────────────────────────
+                    Row([
+                        Icon(icons.HISTORY, size=16, color=COLOR_INFO),
+                        Text("Histórico de Cambios", weight=FontWeight.BOLD, color=COLOR_INFO)
+                    ], spacing=8),
+                    self._construir_log_ticket(ticket.get("ID_TICKET", "")),
+                ], scroll=ScrollMode.AUTO, spacing=12),
                 padding=5
             ),
             actions=[
@@ -4093,6 +4501,42 @@ class PanelAdminIT:
         
         self.page.show_dialog(dialogo)
     
+    def _construir_log_ticket(self, id_ticket: str) -> ft.Control:
+        """Construye la lista de entradas del log de un ticket."""
+        try:
+            entradas = self.gestor.obtener_log_ticket(id_ticket)
+            if not entradas:
+                return Container(
+                    content=Text("Sin cambios registrados.", size=11, color=COLOR_TEXTO_SEC,
+                                 italic=True),
+                    padding=ft.Padding.symmetric(vertical=6)
+                )
+            items = []
+            for entrada in entradas[:15]:  # máx 15 entradas
+                fecha = str(entrada.get("FECHA", ""))[:16]
+                accion  = entrada.get("ACCION", "")
+                detalle = entrada.get("DETALLE", "")
+                op      = entrada.get("USUARIO_OP", "Sistema")
+                items.append(Container(
+                    content=Row([
+                        Icon(icons.CIRCLE, size=8, color=COLOR_ACENTO),
+                        Column([
+                            Row([
+                                Text(accion, size=11, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                Text(f"• {op}", size=10, color=COLOR_TEXTO_SEC),
+                            ], spacing=6),
+                            Text(detalle, size=10, color=COLOR_TEXTO_SEC) if detalle else Container(),
+                        ], spacing=1, expand=True),
+                        Text(fecha, size=9, color=COLOR_TEXTO_SEC)
+                    ], spacing=8),
+                    border=ft.Border(bottom=ft.BorderSide(1, COLOR_SUPERFICIE_2)),
+                    padding=ft.Padding.symmetric(vertical=5)
+                ))
+            return Column(items, spacing=0)
+        except Exception as ex:
+            print(f"[LOG TICKET] {ex}")
+            return Container()
+
     def _ir_a_tickets(self):
         """Navega a la vista de tickets."""
         self.nav_rail.selected_index = 2
@@ -4110,11 +4554,12 @@ class PanelAdminIT:
             self._vista_historial,
             self._vista_reportes,
             self._vista_inventario,
-            self._vista_escaner_red
+            self._vista_escaner_red,
+            self._vista_solicitudes,
+            self._vista_busqueda_global,
         ]
         if self.vista_actual < len(vistas):
             self.contenido.content = vistas[self.vista_actual]()
-            self.header = self._construir_header()
             self.page.update()
     
     def _mostrar_snackbar(self, mensaje: str, color: str):
@@ -4401,6 +4846,32 @@ class PanelAdminIT:
         
         thread = threading.Thread(target=refresh_loop, daemon=True)
         thread.start()
+
+    def _iniciar_backup_automatico(self):
+        """Inicia el hilo de backup diario de la base de datos."""
+        def backup_loop():
+            import time as _time
+            # Primer backup al iniciar (sin bloquear el arranque)
+            _time.sleep(10)
+            try:
+                ruta = self.gestor.hacer_backup_db()
+                if ruta:
+                    print(f"[BACKUP] Backup inicial: {ruta}")
+            except Exception as ex:
+                print(f"[BACKUP] Error inicial: {ex}")
+
+            # Luego cada 24 horas
+            while True:
+                _time.sleep(86400)  # 24h
+                try:
+                    ruta = self.gestor.hacer_backup_db()
+                    if ruta:
+                        print(f"[BACKUP] Backup diario creado: {ruta}")
+                except Exception as ex:
+                    print(f"[BACKUP] Error diario: {ex}")
+
+        threading.Thread(target=backup_loop, daemon=True, name="BackupDiario").start()
+        print("[BACKUP] Hilo de backup diario iniciado")
     
     def _iniciar_servidor_tickets(self):
         """Inicia el servidor HTTP para recibir tickets de la red."""

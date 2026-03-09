@@ -224,9 +224,21 @@ CREATE TABLE IF NOT EXISTS counters (
 );
 """
 
+_DDL_TICKET_LOG = """
+CREATE TABLE IF NOT EXISTS ticket_log (
+    ID          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID_TICKET   TEXT NOT NULL,
+    FECHA       TEXT NOT NULL,
+    USUARIO_OP  TEXT DEFAULT 'Sistema',
+    ACCION      TEXT NOT NULL,
+    DETALLE     TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_log_ticket ON ticket_log(ID_TICKET);
+"""
+
 
 def _crear_tablas(conn: sqlite3.Connection):
-    for ddl in [_DDL_TICKETS, _DDL_TECNICOS, _DDL_EQUIPOS, _DDL_RED, _DDL_COUNTERS]:
+    for ddl in [_DDL_TICKETS, _DDL_TECNICOS, _DDL_EQUIPOS, _DDL_RED, _DDL_COUNTERS, _DDL_TICKET_LOG]:
         conn.executescript(ddl)
 
 
@@ -493,7 +505,7 @@ class GestorTickets:
         )
 
         estado_sis = self.obtener_mensaje_estado_sistema()
-        return {
+        resultado = {
             "ID_TICKET": id_ticket, "TURNO": turno,
             "FECHA_APERTURA": ahora, "USUARIO_AD": usuario_ad,
             "HOSTNAME": hostname, "MAC_ADDRESS": mac_address,
@@ -506,6 +518,252 @@ class GestorTickets:
             "hay_tecnico_disponible": hay_disp,
             "tiempo_espera_estimado": estado_sis["tiempo_estimado"]
         }
+        # Registrar creación en el log
+        try:
+            self.registrar_log_ticket(
+                id_ticket, "Ticket creado",
+                f"Categoría: {categoria} | Prioridad: {prioridad} | Usuario: {usuario_ad} | Estado: {estado}"
+            )
+        except Exception:
+            pass
+        return resultado
+
+    # ------------------------------------------------------------------
+    # LOG DE CAMBIOS POR TICKET
+    # ------------------------------------------------------------------
+
+    def registrar_log_ticket(self, id_ticket: str, accion: str,
+                              detalle: str = "", usuario_op: str = "Sistema") -> bool:
+        """Registra una entrada en el log de cambios de un ticket."""
+        try:
+            self._ejecutar(
+                """INSERT INTO ticket_log (ID_TICKET, FECHA, USUARIO_OP, ACCION, DETALLE)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (id_ticket, _dt_str(datetime.now()), usuario_op, accion, detalle)
+            )
+            return True
+        except Exception as ex:
+            print(f"[LOG] Error registrando log: {ex}")
+            return False
+
+    def obtener_log_ticket(self, id_ticket: str) -> list:
+        """Retorna el historial de cambios de un ticket (más reciente primero)."""
+        rows = self._consultar(
+            "SELECT * FROM ticket_log WHERE ID_TICKET=? ORDER BY ID DESC",
+            (id_ticket,)
+        )
+        return [_row_to_dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # STATS REALES PARA DASHBOARD
+    # ------------------------------------------------------------------
+
+    def obtener_stats_dashboard_reales(self) -> dict:
+        """Calcula estadísticas reales para el dashboard (sin hardcodeos)."""
+        try:
+            from datetime import timedelta
+            hoy = datetime.now().date()
+
+            # --- Distribución horaria real (bloques de 4h) ---
+            rows_horaria = self._consultar(
+                """SELECT strftime('%H', FECHA_APERTURA) as HORA, COUNT(*) as CNT
+                   FROM tickets GROUP BY HORA"""
+            )
+            dist_hora = {str(i).zfill(2): 0 for i in range(24)}
+            for r in rows_horaria:
+                if r["HORA"]:
+                    dist_hora[r["HORA"]] = r["CNT"]
+
+            bloques_4h = ["0-4", "4-8", "8-12", "12-16", "16-20", "20-24"]
+            cantidades_horaria = [
+                sum(dist_hora.get(str(h).zfill(2), 0) for h in range(0, 4)),
+                sum(dist_hora.get(str(h).zfill(2), 0) for h in range(4, 8)),
+                sum(dist_hora.get(str(h).zfill(2), 0) for h in range(8, 12)),
+                sum(dist_hora.get(str(h).zfill(2), 0) for h in range(12, 16)),
+                sum(dist_hora.get(str(h).zfill(2), 0) for h in range(16, 20)),
+                sum(dist_hora.get(str(h).zfill(2), 0) for h in range(20, 24)),
+            ]
+
+            # --- Heatmap real: día de semana x bloque horario ---
+            rows_heat = self._consultar(
+                """SELECT strftime('%w', FECHA_APERTURA) as DIA,
+                          strftime('%H', FECHA_APERTURA) as HORA,
+                          COUNT(*) as CNT
+                   FROM tickets GROUP BY DIA, HORA"""
+            )
+            # Fila = día (0=Dom→lun ajustado), columna = bloque 4h
+            heatmap = [[0]*6 for _ in range(7)]  # [día_lun_dom][bloque]
+            for r in rows_heat:
+                if not r["DIA"] or not r["HORA"]:
+                    continue
+                dia_sql = int(r["DIA"])  # 0=Dom, 1=Lun... 6=Sáb
+                dia_idx = (dia_sql - 1) % 7  # reordenar: 0=Lun ... 6=Dom
+                hora_val = int(r["HORA"])
+                bloque = min(hora_val // 4, 5)
+                heatmap[dia_idx][bloque] += r["CNT"]
+
+            # Normalizar a 0-10 para visualización
+            max_heat = max((max(fila) for fila in heatmap), default=1) or 1
+            heatmap_norm = [[round(v / max_heat * 10) for v in fila] for fila in heatmap]
+
+            # --- SLA real por técnico (% tickets cerrados a tiempo <24h) ---
+            rows_tec = self._consultar(
+                """SELECT TECNICO_ASIGNADO,
+                          COUNT(*) as TOTAL,
+                          SUM(CASE
+                              WHEN ESTADO IN ('Cerrado','Cancelado')
+                               AND FECHA_CIERRE IS NOT NULL
+                               AND CAST((julianday(FECHA_CIERRE)-julianday(FECHA_APERTURA))*24 AS REAL) <= 24
+                              THEN 1 ELSE 0 END) as A_TIEMPO
+                   FROM tickets
+                   WHERE TECNICO_ASIGNADO != ''
+                   GROUP BY TECNICO_ASIGNADO"""
+            )
+            sla_tecnicos = {}
+            for r in rows_tec:
+                if r["TECNICO_ASIGNADO"] and r["TOTAL"] > 0:
+                    sla = round(r["A_TIEMPO"] / r["TOTAL"] * 100)
+                    sla_tecnicos[r["TECNICO_ASIGNADO"]] = sla
+
+            # --- Tiempos de resolución reales ---
+            rows_tiempos = self._consultar(
+                """SELECT CAST((julianday(FECHA_CIERRE)-julianday(FECHA_APERTURA))*24 AS REAL) as HORAS
+                   FROM tickets
+                   WHERE ESTADO IN ('Cerrado','Cancelado')
+                     AND FECHA_CIERRE IS NOT NULL
+                     AND FECHA_APERTURA IS NOT NULL"""
+            )
+            tiempos = [r["HORAS"] for r in rows_tiempos if r["HORAS"] and r["HORAS"] > 0]
+            if tiempos:
+                tiempos.sort()
+                t_min    = round(min(tiempos), 1)
+                t_max    = round(max(tiempos), 1)
+                t_prom   = round(sum(tiempos) / len(tiempos), 1)
+                t_median = round(tiempos[len(tiempos) // 2], 1)
+                n = len(tiempos)
+                dist_tiempos = {
+                    "< 4h":   sum(1 for t in tiempos if t < 4),
+                    "4-8h":   sum(1 for t in tiempos if 4 <= t < 8),
+                    "8-24h":  sum(1 for t in tiempos if 8 <= t < 24),
+                    "24-48h": sum(1 for t in tiempos if 24 <= t < 48),
+                    "> 48h":  sum(1 for t in tiempos if t >= 48),
+                }
+            else:
+                t_min = t_max = t_prom = t_median = 0.0
+                dist_tiempos = {"< 4h": 0, "4-8h": 0, "8-24h": 0, "24-48h": 0, "> 48h": 0}
+
+            # --- Predicción: promedio histórico por hora del día ---
+            rows_pred = self._consultar(
+                """SELECT strftime('%H', FECHA_APERTURA) as HORA, COUNT(*) as CNT,
+                          COUNT(DISTINCT DATE(FECHA_APERTURA)) as DIAS
+                   FROM tickets GROUP BY HORA"""
+            )
+            pred_por_hora = {str(h).zfill(2): 0.0 for h in range(24)}
+            for r in rows_pred:
+                if r["HORA"] and r["DIAS"] and r["DIAS"] > 0:
+                    pred_por_hora[r["HORA"]] = round(r["CNT"] / r["DIAS"], 1)
+
+            # Próximas 6 horas a partir de ahora
+            hora_actual = datetime.now().hour
+            horas_pred = []
+            vals_pred  = []
+            for i in range(6):
+                h = (hora_actual + i) % 24
+                horas_pred.append(f"{h:02d}:00")
+                vals_pred.append(pred_por_hora.get(str(h).zfill(2), 0.0))
+
+            return {
+                "bloques_horarios":   bloques_4h,
+                "cantidades_horaria": cantidades_horaria,
+                "heatmap":            heatmap_norm,
+                "sla_tecnicos":       sla_tecnicos,
+                "t_min":              t_min,
+                "t_max":              t_max,
+                "t_prom":             t_prom,
+                "t_median":           t_median,
+                "dist_tiempos":       dist_tiempos,
+                "horas_pred":         horas_pred,
+                "vals_pred":          vals_pred,
+            }
+        except Exception as ex:
+            print(f"[STATS DASHBOARD] Error: {ex}")
+            return {
+                "bloques_horarios":   ["0-4","4-8","8-12","12-16","16-20","20-24"],
+                "cantidades_horaria": [0]*6,
+                "heatmap":            [[0]*6 for _ in range(7)],
+                "sla_tecnicos":       {},
+                "t_min": 0, "t_max": 0, "t_prom": 0, "t_median": 0,
+                "dist_tiempos":       {"< 4h": 0, "4-8h": 0, "8-24h": 0, "24-48h": 0, "> 48h": 0},
+                "horas_pred":         [],
+                "vals_pred":          [],
+            }
+
+    # ------------------------------------------------------------------
+    # BÚSQUEDA GLOBAL
+    # ------------------------------------------------------------------
+
+    def buscar_global(self, query: str) -> dict:
+        """Busca en tickets, equipos y técnicos. Retorna dict con listas."""
+        q = f"%{query.strip()}%"
+        tickets = self._consultar(
+            """SELECT * FROM tickets
+               WHERE ID_TICKET LIKE ? OR USUARIO_AD LIKE ? OR HOSTNAME LIKE ?
+                  OR CATEGORIA LIKE ? OR DESCRIPCION LIKE ? OR TECNICO_ASIGNADO LIKE ?
+               ORDER BY FECHA_APERTURA DESC LIMIT 30""",
+            (q, q, q, q, q, q)
+        )
+        equipos = self._consultar(
+            """SELECT * FROM equipos
+               WHERE MAC_ADDRESS LIKE ? OR NOMBRE_EQUIPO LIKE ? OR HOSTNAME LIKE ?
+                  OR USUARIO_ASIGNADO LIKE ? OR GRUPO LIKE ? OR UBICACION LIKE ?
+               LIMIT 20""",
+            (q, q, q, q, q, q)
+        )
+        tecnicos = self._consultar(
+            """SELECT * FROM tecnicos
+               WHERE NOMBRE LIKE ? OR ESPECIALIDAD LIKE ? OR EMAIL LIKE ?
+               LIMIT 10""",
+            (q, q, q)
+        )
+        return {
+            "tickets":  [_row_to_dict(r) for r in tickets],
+            "equipos":  [_row_to_dict(r) for r in equipos],
+            "tecnicos": [_row_to_dict(r) for r in tecnicos],
+        }
+
+    # ------------------------------------------------------------------
+    # BACKUP
+    # ------------------------------------------------------------------
+
+    def hacer_backup_db(self, carpeta_backup: str = "") -> str:
+        """Crea una copia de tickets.db. Retorna la ruta del backup creado."""
+        import shutil
+        if not carpeta_backup:
+            carpeta_backup = str(self.db_path.parent / "backups")
+        os.makedirs(carpeta_backup, exist_ok=True)
+        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = os.path.join(carpeta_backup, f"tickets_backup_{ts}.db")
+        try:
+            # Backup seguro: SQLite backup API (respeta WAL)
+            src_conn  = _conectar(self.db_path)
+            dest_conn = sqlite3.connect(dest)
+            src_conn.backup(dest_conn)
+            dest_conn.close()
+            src_conn.close()
+            # Limpiar backups viejos (conservar últimos 10)
+            backups = sorted(
+                [f for f in os.listdir(carpeta_backup) if f.startswith("tickets_backup_")]
+            )
+            for viejo in backups[:-10]:
+                try:
+                    os.remove(os.path.join(carpeta_backup, viejo))
+                except Exception:
+                    pass
+            print(f"[BACKUP] Backup creado: {dest}")
+            return dest
+        except Exception as ex:
+            print(f"[BACKUP] Error: {ex}")
+            return ""
 
     def obtener_todos_tickets(self) -> pd.DataFrame:
         return self._leer_datos()
@@ -625,6 +883,19 @@ class GestorTickets:
             f"UPDATE tickets SET {', '.join(sets)} WHERE ID_TICKET=?",
             params
         )
+        # Registrar en log automáticamente
+        try:
+            cambios_log = []
+            if estado is not None:
+                cambios_log.append(f"Estado → {estado}")
+            if tecnico_asignado is not None:
+                cambios_log.append(f"Técnico → {tecnico_asignado}")
+            if notas_resolucion is not None:
+                cambios_log.append("Notas de resolución actualizadas")
+            if cambios_log:
+                self.registrar_log_ticket(id_ticket, "Actualización", " | ".join(cambios_log))
+        except Exception:
+            pass
         return True
 
     def filtrar_tickets(self, estado: Optional[str] = None,
