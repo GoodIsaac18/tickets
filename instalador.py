@@ -149,14 +149,52 @@ Sistema de Tickets IT v3.0 — Soporte Técnico Profesional"""
 # FUNCIONES DE UTILIDAD
 # =============================================================================
 
-def obtener_escritorio():
-    return Path(os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"))
+def _shget_folder(csidl: int) -> Path:
+    """Llama a SHGetFolderPathW (shell32.dll) para obtener rutas especiales
+    de Windows de forma correcta en cualquier idioma.
 
-def obtener_menu_inicio():
-    return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs"))
+    CSIDLs usados:
+      0x0010  CSIDL_DESKTOPDIRECTORY  – Escritorio / Desktop
+      0x000B  CSIDL_STARTMENU         – Start Menu raíz
+      0x0002  CSIDL_PROGRAMS          – Start Menu\\Programs
+      0x0007  CSIDL_STARTUP           – Start Menu\\Programs\\Startup
+    """
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        ctypes.windll.shell32.SHGetFolderPathW(0, csidl, 0, 0, buf)
+        ruta = buf.value
+        if ruta:
+            return Path(ruta)
+    except Exception:
+        pass
+    # Fallback genérico si shell32 no responde
+    return Path(os.environ.get("USERPROFILE", ""))
 
-def obtener_carpeta_startup():
-    return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup"))
+
+def obtener_escritorio() -> Path:
+    """Devuelve la ruta real del Escritorio, independiente del idioma de Windows."""
+    ruta = _shget_folder(0x0010)  # CSIDL_DESKTOPDIRECTORY
+    if ruta != Path(os.environ.get("USERPROFILE", "")):
+        return ruta
+    # Último fallback
+    return Path(os.environ.get("USERPROFILE", "")) / "Desktop"
+
+
+def obtener_menu_inicio() -> Path:
+    """Devuelve …\\Start Menu\\Programs en el idioma correcto."""
+    ruta = _shget_folder(0x0002)  # CSIDL_PROGRAMS
+    if ruta != Path(os.environ.get("USERPROFILE", "")):
+        return ruta
+    return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+
+
+def obtener_carpeta_startup() -> Path:
+    """Devuelve la carpeta Startup del usuario (inicio automático)."""
+    ruta = _shget_folder(0x0007)  # CSIDL_STARTUP
+    if ruta != Path(os.environ.get("USERPROFILE", "")):
+        return ruta
+    return obtener_menu_inicio() / "Startup"
 
 def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
                              descripcion: str = "", icono_path: Path = None):
@@ -287,10 +325,17 @@ class InstaladorGrafico:
         self.page.title = f"Instalador — {APP_NAME}"
         self.page.bgcolor = COLOR_FONDO
         self.page.padding = 0
+        # tamaño sugerido; permitirá redimensionar para pantallas pequeñas
         self.page.window.width = 920
         self.page.window.height = 700
         self.page.theme_mode = ft.ThemeMode.DARK
-        self.page.window.resizable = False
+        self.page.window.resizable = True
+        # límites mínimos razonables para que la UI no se rompa
+        try:
+            self.page.window.min_width = 600
+            self.page.window.min_height = 500
+        except Exception:
+            pass
 
     # =================================================================
     # NAVEGACIÓN PRINCIPAL
@@ -319,6 +364,7 @@ class InstaladorGrafico:
                 content=contenido,
                 expand=True,
                 padding=30 if not es_menu else 0,
+                scroll=ft.ScrollMode.AUTO,
             )
         )
 
@@ -2282,28 +2328,59 @@ WshShell.Run """{python_exe}"" ""{base / py_script}""", 0, False
     def _crear_accesos_directos(self):
         """Crea accesos directos según las opciones seleccionadas."""
         base = Path(self.directorio_destino)
+        # escoger launcher y nombre según tipo
         if self.tipo_instalacion == "emisora":
             nombre_app = APP_NAME_EMISORA
             vbs_path = base / "launcher_emisora.vbs"
-            icono_path = base / "icons" / "emisora.ico"
+            buscado = "emisora"
         else:
             nombre_app = APP_NAME_RECEPTORA
             vbs_path = base / "launcher_receptora.vbs"
-            icono_path = base / "icons" / "receptora.ico"
+            buscado = "receptora"
 
-        ico = icono_path if icono_path.exists() else None
+        # buscar icono en carpeta icons (cualquier nombre que incluya el texto)
+        ico = None
+        icon_dir = base / "icons"
+        if icon_dir.exists():
+            # priorizar coincidencias con buscado
+            matches = list(icon_dir.glob(f"*{buscado}*.ico"))
+            if matches:
+                ico = matches[0]
+            else:
+                anyico = list(icon_dir.glob("*.ico"))
+                if anyico:
+                    ico = anyico[0]
+
+        # Si llevamos icono y vamos a crear accesos en otra carpeta, copiar icono
+        # a esa carpeta para que el .lnk no pierda la referencia en caso de mover
+        # o borrar la instalación original.
+        def _prep_icon(dest_folder: Path) -> Path | None:
+            if ico is None:
+                return None
+            try:
+                dest_folder.mkdir(parents=True, exist_ok=True)
+                dest_icon = dest_folder / f"{nombre_app}.ico"
+                shutil.copy2(ico, dest_icon)
+                return dest_icon
+            except Exception:
+                return ico  # fallback a original, si falla la copia
 
         if self.opt_escritorio:
-            crear_acceso_directo_vbs(vbs_path, nombre_app, obtener_escritorio(),
-                                     f"{nombre_app} — {APP_NAME}", ico)
+            dst = obtener_escritorio()
+            ico_use = _prep_icon(dst) or ico
+            crear_acceso_directo_vbs(vbs_path, nombre_app, dst,
+                                     f"{nombre_app} — {APP_NAME}", ico_use)
         if self.opt_menu_inicio:
             carpeta = obtener_menu_inicio() / "Sistema Tickets IT"
             carpeta.mkdir(parents=True, exist_ok=True)
+            ico_use = _prep_icon(carpeta) or ico
             crear_acceso_directo_vbs(vbs_path, nombre_app, carpeta,
-                                     f"{nombre_app} — {APP_NAME}", ico)
+                                     f"{nombre_app} — {APP_NAME}", ico_use)
         if self.opt_inicio_windows:
-            crear_acceso_directo_vbs(vbs_path, nombre_app, obtener_carpeta_startup(),
-                                     f"{nombre_app} — Inicio automático", ico)
+            dst = obtener_carpeta_startup()
+            ico_use = _prep_icon(dst) or ico
+            crear_acceso_directo_vbs(vbs_path, nombre_app, dst,
+                                     f"{nombre_app} — Inicio automático", ico_use)
 
     def _configurar_firewall(self):
         """Configura reglas de Windows Firewall para el puerto 5555."""
