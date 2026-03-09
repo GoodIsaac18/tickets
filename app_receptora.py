@@ -4951,7 +4951,7 @@ class PanelAdminIT:
             
             dlg = AlertDialog(
                 modal=True,
-                shape=RoundedRectangleBorder(radius=16),
+                shape=ft.RoundedRectangleBorder(radius=16),
                 bgcolor=COLOR_SUPERFICIE,
                 title=Row([
                     Container(
@@ -5132,7 +5132,7 @@ class PanelAdminIT:
         
         dlg = AlertDialog(
             modal=True,
-            shape=RoundedRectangleBorder(radius=16),
+            shape=ft.RoundedRectangleBorder(radius=16),
             bgcolor=COLOR_SUPERFICIE,
             title=Row([
                 Container(
@@ -5594,7 +5594,7 @@ class PanelAdminIT:
                 Container(height=5),
                 *alertas
             ], spacing=5),
-            margin=ft.margin.only(bottom=15)
+            margin=ft.Margin.only(bottom=15)
         )
     
     def _construir_tabla_red(self, equipos: pd.DataFrame) -> DataTable:
