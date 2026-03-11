@@ -189,12 +189,9 @@ def obtener_menu_inicio() -> Path:
     return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"
 
 
-def obtener_carpeta_startup() -> Path:
-    """Devuelve la carpeta Startup del usuario (inicio automático)."""
-    ruta = _shget_folder(0x0007)  # CSIDL_STARTUP
-    if ruta != Path(os.environ.get("USERPROFILE", "")):
-        return ruta
-    return obtener_menu_inicio() / "Startup"
+def obtener_carpeta_startup():
+    return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup"))
+
 def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
                              descripcion: str = "", icono_path: Path = None):
     """Crea un acceso directo (.lnk) a un archivo VBS."""
