@@ -6690,7 +6690,7 @@ class PanelAdminIT:
                         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
                         bgcolor=COLOR_ERROR if intentos >= 3 else COLOR_ADVERTENCIA,
                         padding=14, border_radius=12, width=60,
-                        alignment=ft.alignment.center
+    alignment=ft.Alignment.CENTER
                     ),
 
                     # Datos del equipo

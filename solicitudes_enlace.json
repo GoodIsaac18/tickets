@@ -1,1 +1,13 @@
-{}
+{
+  "50:eb:f6:b8:10:57": {
+    "mac_address": "50:eb:f6:b8:10:57",
+    "hostname": "DESKTOP-I7NV9R8",
+    "usuario_ad": "Usuario",
+    "ip_address": "192.168.1.54",
+    "nombre_equipo": "DESKTOP-I7NV9R8",
+    "fecha_solicitud": "2026-03-11T07:06:59.936052",
+    "estado": "pendiente",
+    "intentos": 1,
+    "reenvio": false
+  }
+}

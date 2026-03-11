@@ -195,27 +195,30 @@ def obtener_carpeta_startup() -> Path:
     if ruta != Path(os.environ.get("USERPROFILE", "")):
         return ruta
     return obtener_menu_inicio() / "Startup"
-
 def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
                              descripcion: str = "", icono_path: Path = None):
     """Crea un acceso directo (.lnk) a un archivo VBS."""
     try:
         carpeta.mkdir(parents=True, exist_ok=True)
+        
+        # Usar comillas simples en PowerShell para evitar problemas de escapado
+        lnk_path = str(carpeta / f"{nombre}.lnk").replace("'", "''")
+        vbs_str = str(vbs_path).replace("'", "''")
+        workdir = str(vbs_path.parent).replace("'", "''")
+        descripcion_esc = descripcion.replace("'", "''")
+        
         icono_linea = ""
         if icono_path and icono_path.exists():
-            icono_linea = f'$Shortcut.IconLocation = "{icono_path},0"'
-        
-        lnk_path = str(carpeta / f"{nombre}.lnk")
-        vbs_str = str(vbs_path)
-        workdir = str(vbs_path.parent)
+            icono_esc = str(icono_path).replace("'", "''")
+            icono_linea = f"$Shortcut.IconLocation = '{icono_esc},0'"
         
         ps_script = f'''
 $WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut("{lnk_path}")
-$Shortcut.TargetPath = "wscript.exe"
+$Shortcut = $WshShell.CreateShortcut('{lnk_path}')
+$Shortcut.TargetPath = 'wscript.exe'
 $Shortcut.Arguments = '"{vbs_str}"'
-$Shortcut.WorkingDirectory = "{workdir}"
-$Shortcut.Description = "{descripcion}"
+$Shortcut.WorkingDirectory = '{workdir}'
+$Shortcut.Description = '{descripcion_esc}'
 {icono_linea}
 $Shortcut.Save()
 '''
@@ -226,7 +229,7 @@ $Shortcut.Save()
         if result.returncode != 0:
             print(f"[INSTALADOR] Error creando acceso directo '{nombre}': {result.stderr}")
             return False
-        print(f"[INSTALADOR] ✓ Acceso directo creado: {lnk_path}")
+        print(f"[INSTALADOR] Acceso directo creado: {lnk_path}")
         return True
     except Exception as e:
         print(f"[INSTALADOR] Error creando acceso directo: {e}")
