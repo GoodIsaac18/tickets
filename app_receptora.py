@@ -2167,7 +2167,7 @@ class PanelAdminIT:
         # Contenedor de la tabla (con scroll horizontal y vertical)
         self.contenedor_tabla_tickets = Container(
             content=Column(
-                controls=[Row(controls=[self.tabla_tickets])],
+                controls=[Row(controls=[self.tabla_tickets], scroll=ScrollMode.AUTO)],
                 scroll=ScrollMode.AUTO,
             ),
             bgcolor=COLOR_SUPERFICIE,
@@ -2345,7 +2345,7 @@ class PanelAdminIT:
         self.tabla_tickets = self._construir_tabla_tickets(df)
         if hasattr(self, 'contenedor_tabla_tickets'):
             self.contenedor_tabla_tickets.content = Column(
-                controls=[Row(controls=[self.tabla_tickets])],
+                controls=[Row(controls=[self.tabla_tickets], scroll=ScrollMode.AUTO)],
                 scroll=ScrollMode.AUTO,
             )
             self.page.update()
@@ -2994,7 +2994,7 @@ class PanelAdminIT:
             column_spacing=18
         )
         return Column(
-            controls=[Row(controls=[tabla])],
+            controls=[Row(controls=[tabla], scroll=ScrollMode.AUTO)],
             scroll=ScrollMode.AUTO,
         )
 
@@ -4022,7 +4022,7 @@ class PanelAdminIT:
                 ], spacing=5),
                 Divider(color=COLOR_SUPERFICIE_2),
                 Container(height=10),
-                Row(puntos, spacing=8, alignment=MainAxisAlignment.CENTER)
+                Row(puntos, spacing=8, alignment=MainAxisAlignment.CENTER, scroll=ScrollMode.AUTO)
             ], spacing=8),
             bgcolor=COLOR_SUPERFICIE,
             border_radius=ft.BorderRadius.all(15),
@@ -4133,7 +4133,7 @@ class PanelAdminIT:
                 ], alignment=MainAxisAlignment.SPACE_BETWEEN),
                 Divider(color=COLOR_SUPERFICIE_2),
                 Container(height=15),
-                Row(barras, spacing=10, alignment=MainAxisAlignment.CENTER)
+                Row(barras, spacing=10, alignment=MainAxisAlignment.CENTER, scroll=ScrollMode.AUTO)
             ], spacing=10),
             bgcolor=COLOR_SUPERFICIE,
             border_radius=ft.BorderRadius.all(15),
@@ -5091,7 +5091,7 @@ class PanelAdminIT:
                 Container(height=10),
                 Container(
                     content=Column(
-                        controls=[Row(controls=[self.tabla_equipos])],
+                        controls=[Row(controls=[self.tabla_equipos], scroll=ScrollMode.AUTO)],
                         scroll=ScrollMode.AUTO,
                     ),
                     expand=True,
@@ -5741,7 +5741,7 @@ class PanelAdminIT:
     def _wrap_tabla_scroll(tabla_widget, height_px: int):
         """Envuelve un DataTable en Column+Row para scroll vertical y horizontal."""
         return Column(
-            controls=[Row([tabla_widget])],
+            controls=[Row([tabla_widget], scroll=ScrollMode.AUTO)],
             scroll=ScrollMode.AUTO,
             height=height_px,
         )

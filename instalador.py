@@ -190,11 +190,7 @@ def obtener_menu_inicio() -> Path:
 
 
 def obtener_carpeta_startup():
-    """Devuelve la carpeta Startup (Inicio) usando la API de Windows."""
-    ruta = _shget_folder(0x0007)  # CSIDL_STARTUP
-    if ruta != Path(os.environ.get("USERPROFILE", "")):
-        return ruta
-    return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup"))
 
 def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
                              descripcion: str = "", icono_path: Path = None):
@@ -363,25 +359,15 @@ class InstaladorGrafico:
         columna = []
         if not es_menu:
             columna.append(self._crear_header(mostrar_pasos))
-        # Envolver contenido en Column si es necesario para scroll
-        if type(contenido).__name__ == 'Column':
-            # Ya es Column, solo agregar padding al contenido
-            columna.append(
-                ft.Container(
-                    content=contenido,
-                    expand=True,
-                    padding=30 if not es_menu else 0,
-                )
+        
+        # El scroll debe estar en Column, no en Container
+        columna.append(
+            ft.Container(
+                content=ft.Column([contenido], scroll=ft.ScrollMode.AUTO, expand=True),
+                expand=True,
+                padding=30 if not es_menu else 0,
             )
-        else:
-            # Otros tipos, envolver en Column con scroll
-            columna.append(
-                ft.Container(
-                    content=ft.Column([contenido], scroll=ft.ScrollMode.AUTO, expand=True),
-                    expand=True,
-                    padding=30 if not es_menu else 0,
-                )
-            )
+        )
 
         self.page.add(
             ft.Container(
@@ -2324,7 +2310,7 @@ class InstaladorGrafico:
     # =================================================================
 
     def _crear_launcher_vbs(self):
-        """Crea el archivo VBS para ejecutar la app sin ventana de consola (con rutas dinámicas)."""
+        """Crea el archivo VBS para ejecutar la app sin ventana de consola."""
         base = Path(self.directorio_destino)
         if self.tipo_instalacion == "emisora":
             vbs_path = base / "launcher_emisora.vbs"
@@ -2333,14 +2319,12 @@ class InstaladorGrafico:
             vbs_path = base / "launcher_receptora.vbs"
             py_script = "app_receptora.py"
 
-        vbs_content = f'''Set fso = CreateObject("Scripting.FileSystemObject")
-currentDir = fso.GetParentFolderName(WScript.ScriptFullName)
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.CurrentDirectory = currentDir
-WshShell.Run """" & currentDir & "\python_embed\python.exe"" """ & currentDir & "\{py_script}""", 0, False
+        python_exe = base / "python_embed" / "python.exe"
+        vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
+WshShell.CurrentDirectory = "{base}"
+WshShell.Run """{python_exe}"" ""{base / py_script}""", 0, False
 '''
-        
-        vbs_path.write_text(vbs_content, encoding="utf-8")
+        vbs_path.write_text(vbs_content)
 
     def _crear_accesos_directos(self):
         """Crea accesos directos según las opciones seleccionadas."""
