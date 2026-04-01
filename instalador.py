@@ -363,14 +363,25 @@ class InstaladorGrafico:
         columna = []
         if not es_menu:
             columna.append(self._crear_header(mostrar_pasos))
-        columna.append(
-            ft.Container(
-                content=contenido,
-                expand=True,
-                padding=30 if not es_menu else 0,
-                scroll=ft.ScrollMode.AUTO,
+        # Envolver contenido en Column si es necesario para scroll
+        if type(contenido).__name__ == 'Column':
+            # Ya es Column, solo agregar padding al contenido
+            columna.append(
+                ft.Container(
+                    content=contenido,
+                    expand=True,
+                    padding=30 if not es_menu else 0,
+                )
             )
-        )
+        else:
+            # Otros tipos, envolver en Column con scroll
+            columna.append(
+                ft.Container(
+                    content=ft.Column([contenido], scroll=ft.ScrollMode.AUTO, expand=True),
+                    expand=True,
+                    padding=30 if not es_menu else 0,
+                )
+            )
 
         self.page.add(
             ft.Container(
