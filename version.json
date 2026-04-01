@@ -1,25 +1,26 @@
 {
-    "version": "3.4.0",
-    "fecha": "2026-03-06",
+    "version": "4.0.0",
+    "fecha": "2026-04-01",
     "critico": false,
-    "descripcion": "Mejoras receptora: scroll tablas, auditoría, filtro prioridad, fix escaneo red, dashboard real",
+    "descripcion": "Compilación profesional con PyInstaller, rutas dinámicas, limpieza de archivos",
     "cambios": [
-        "Mejora: Scroll horizontal y vertical en todas las tablas (tickets, historial, equipos, red)",
-        "Nueva: Sección de Auditoría y Seguimiento en Historial (usuarios, equipos, categorías problemáticas)",
-        "Nueva: Filtro por prioridad en vista de Tickets (Crítica, Alta, Media, Baja)",
-        "Nueva: Prioridad 'Crítica' añadida al sistema de tickets",
-        "Mejora: Tickets ordenados automáticamente por urgencia (Críticas primero)",
-        "Fix: Escáner de red - botón agregar a inventario ahora funciona correctamente",
-        "Fix: Equipos ya no salen todos offline (referencias dinámicas corregidas)",
-        "Fix: Dashboard usa datos reales en vez de simulados (tendencias, estado equipos)",
-        "Mejora: Insights de día pico, hora pico y usuarios recurrentes en auditoría"
+        "Compilación profesional con PyInstaller (--onedir, 174 MB)",
+        "Instalador precompilado: Instalador_Tickets_4.0.0.exe",
+        "No requiere Python instalado en el usuario final",
+        "Todos los binarios de Flet Desktop incluidos",
+        "Fix: Rutas dinámicas en VBS launchers (GetParentFolderName)",
+        "Fix: Flet Icons error con --collect-all flet_desktop",
+        "Limpieza: Eliminados archivos obsoletos (actualizar_v3.x, backups, generar_iconos)",
+        "Documentación: README actualizado con instrucciones de instalación y compilación",
+        "GitHub Releases: .exe disponible para descarga directa"
     ],
     "archivos_modificados": [
-        "app_receptora.py",
-        "data_access.py",
         "instalador.py",
+        "launcher_receptora.vbs",
+        "launcher_emisora.vbs",
+        "README.md",
         "version.json"
     ],
-    "notas": "Requiere conexión a internet para verificar actualizaciones. El sistema funciona offline normalmente.",
-    "compatibilidad": "Python 3.11+, Flet 0.81+, Windows 10/11"
+    "notas": "Versión compilada disponible en GitHub Releases. No requiere Python instalado.",
+    "compatibilidad": "Windows 10/11, sin Python requerido para usuarios finales"
 }
