@@ -109,8 +109,18 @@ $Shortcut.Description = "{descripcion}"
 {icono_linea}
 $Shortcut.Save()
 '''
-        subprocess.run(["powershell", "-Command", ps_script], capture_output=True)
-        return True
+
+        # Depurar el contenido del script de PowerShell
+        print("Script de PowerShell generado:")
+        print(ps_script)
+
+        result = subprocess.run(["powershell", "-Command", ps_script], capture_output=True, text=True)
+
+        # Registrar la salida del comando
+        print("Salida de PowerShell:", result.stdout)
+        print("Errores de PowerShell:", result.stderr)
+
+        return result.returncode == 0
     except Exception as e:
         print(f"Error: {e}")
         return False

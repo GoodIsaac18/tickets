@@ -1,0 +1,23 @@
+# =============================================================================
+# DEPENDENCIAS DEL PROYECTO - Sistema de Tickets IT
+# =============================================================================
+# Instalar con: pip install -r requirements.txt
+# =============================================================================
+
+# Framework de interfaz gráfica moderna
+flet>=0.21.0
+
+# Manejo de datos y análisis
+pandas>=2.0.0
+
+# Motor para leer/escribir archivos Excel
+openpyxl>=3.1.0
+
+# Obtención de dirección MAC (compatible Windows/macOS/Linux)
+getmac>=0.9.0
+
+# Notificaciones del sistema Windows (toast notifications)
+winotify>=1.1.0
+# Servidor y cliente WebSocket (sincronización en tiempo real via push)
+# SQLite ya viene incluido con Python — sin instalación adicional
+websockets>=12.0
