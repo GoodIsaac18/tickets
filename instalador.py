@@ -190,7 +190,11 @@ def obtener_menu_inicio() -> Path:
 
 
 def obtener_carpeta_startup():
-    return Path(os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs", "Startup"))
+    """Devuelve la carpeta Startup (Inicio) usando la API de Windows."""
+    ruta = _shget_folder(0x0007)  # CSIDL_STARTUP
+    if ruta != Path(os.environ.get("USERPROFILE", "")):
+        return ruta
+    return Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 
 def crear_acceso_directo_vbs(vbs_path: Path, nombre: str, carpeta: Path,
                              descripcion: str = "", icono_path: Path = None):
@@ -219,12 +223,8 @@ $Shortcut.Description = '{descripcion_esc}'
 {icono_linea}
 $Shortcut.Save()
 '''
-        # Para evitar problemas con nuevas líneas en línea de comando:
-        import base64
-        ps_encoded = base64.b64encode(ps_script.encode('utf-16le')).decode('utf-8')
-
         result = subprocess.run(
-            ["powershell", "-ExecutionPolicy", "Bypass", "-EncodedCommand", ps_encoded],
+            ["powershell", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
             capture_output=True, text=True, timeout=15
         )
         if result.returncode != 0:
@@ -2313,7 +2313,7 @@ class InstaladorGrafico:
     # =================================================================
 
     def _crear_launcher_vbs(self):
-        """Crea el archivo VBS para ejecutar la app sin ventana de consola."""
+        """Crea el archivo VBS para ejecutar la app sin ventana de consola (con rutas dinámicas)."""
         base = Path(self.directorio_destino)
         if self.tipo_instalacion == "emisora":
             vbs_path = base / "launcher_emisora.vbs"
@@ -2322,12 +2322,14 @@ class InstaladorGrafico:
             vbs_path = base / "launcher_receptora.vbs"
             py_script = "app_receptora.py"
 
-        python_exe = base / "python_embed" / "python.exe"
-        vbs_content = f'''Set WshShell = CreateObject("WScript.Shell")
-WshShell.CurrentDirectory = "{base}"
-WshShell.Run """{python_exe}"" ""{base / py_script}""", 0, False
+        vbs_content = f'''Set fso = CreateObject("Scripting.FileSystemObject")
+currentDir = fso.GetParentFolderName(WScript.ScriptFullName)
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.CurrentDirectory = currentDir
+WshShell.Run """" & currentDir & "\python_embed\python.exe"" """ & currentDir & "\{py_script}""", 0, False
 '''
-        vbs_path.write_text(vbs_content)
+        
+        vbs_path.write_text(vbs_content, encoding="utf-8")
 
     def _crear_accesos_directos(self):
         """Crea accesos directos según las opciones seleccionadas."""

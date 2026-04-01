@@ -114,7 +114,7 @@ Write-Host "
 | 	ickets | Todos los tickets de soporte |
 | 	ecnicos | Datos de los técnicos IT |
 | equipos | Inventario de equipos |
-| ed | Estado de equipos en red |
+| red | Estado de equipos en red |
 | counters | Contador atómico de turnos |
 
 **Archivos WAL** (normales, no son errores):
