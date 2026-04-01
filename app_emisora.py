@@ -12,6 +12,7 @@ from flet import (
     MainAxisAlignment, CrossAxisAlignment, FontWeight,
     TextAlign, Icons as icons, Icon, Divider, Card
 )
+from pathlib import Path
 import asyncio
 from datetime import datetime
 from typing import Optional
@@ -3305,11 +3306,6 @@ def main(page: Page):
 
 
 if __name__ == "__main__":
-    # asegurarse de que el directorio de iconos esté en assets para que se copie
+    # asegurarse de que el directorio de iconos esté en assets
     assets = str(Path(__file__).parent)
-    ico = Path(assets) / "icons" / "emisora.ico"
-    # ft.run acepta window_icon; si no existe, se ignora
-    if ico.exists():
-        ft.run(main, assets_dir=assets, window_icon=str(ico))
-    else:
-        ft.run(main, assets_dir=assets)
+    ft.run(main, assets_dir=assets)
