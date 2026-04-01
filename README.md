@@ -42,38 +42,62 @@ tickets/
 
 ## 🚀 Instalación
 
-### Opción 1: Instalador Compilado (Recomendado) — v4.0.0+
+### ⭐ Opción 1: Descargar Compilado (Recomendado)
 
-El instalador precompilado **no requiere Python instalado**:
+**El `.exe` precompilado NO incluido en el repositorio** (está en `.gitignore`).
+
+**Descargar desde:** [GitHub Releases](https://github.com/GoodIsaac18/tickets/releases)
+
+1. Ir a la página de Releases del proyecto
+2. Descargar `Instalador_Tickets_4.0.0.zip` (~174 MB)
+3. Extraer archivo
+4. Ejecutar `Instalador_Tickets_4.0.0\Instalador_Tickets_4.0.0.exe`
+
+**Ventaja:** No requiere Python, solo ejecutar el `.exe`
+
+---
+
+### Opción 2: Compilar desde Código Fuente
+
+Si clonaste el repositorio y quieres generar el `.exe` localmente:
 
 ```bash
-# Ejecutar directamente
-.\dist\Instalador_Tickets_4.0.0\Instalador_Tickets_4.0.0.exe
+# Posicionarse en la raíz del proyecto
+cd tickets-main
+
+# Limpiar compilaciones anteriores
+Remove-Item -Path "dist", "build" -Recurse -Force -ErrorAction SilentlyContinue
+
+# Compilar con PyInstaller
+.\python_embed\python.exe -m PyInstaller `
+  --onedir `
+  --windowed `
+  --name "Instalador_Tickets_4.0.0" `
+  --icon="icons/receptora.ico" `
+  --add-data "icons:icons" `
+  --collect-all flet `
+  --collect-all flet_desktop `
+  --hidden-import=flet.controls.material.icons `
+  --hidden-import=flet_desktop `
+  --hidden-import=pandas `
+  --hidden-import=openpyxl `
+  instalador.py
 ```
 
-**Tamaño:** 174 MB (incluye todas las dependencias: Flet, pandas, openpyxl, etc.)
+**Resultado:** `dist/Instalador_Tickets_4.0.0/Instalador_Tickets_4.0.0.exe`
 
-El instalador presenta un wizard con las siguientes opciones:
-- 🎫 **Emisora**: Para equipos de trabajadores
-- 🖥️ **Receptora**: Para el equipo del técnico IT
+---
 
-Opciones configurables:
-- Crear acceso directo en Escritorio (con rutas dinámicas)
-- Crear acceso en Menú Inicio
-- Iniciar con Windows (autoarranque)
-- Configurar Firewall automáticamente
+### Opción 3: Instalador Gráfico desde Fuente
 
-El instalador detecta instalaciones previas y ofrece:
-- **Actualizar** → Conecta a GitHub y descarga parches automáticamente
-- **Desinstalar** → Limpia accesos directos, registros y configuraciones
-- **Reinstalar** → Instalación limpia conservando datos
+Si tienes el código fuente:
 
-### Opción 2: Instalador Gráfico desde Fuente
+1. Ejecutar **`SISTEMA_TICKETS.bat`** en la raíz del proyecto
+2. El instalador se compile y ejecutará automáticamente
 
-1. Ejecutar **`SISTEMA_TICKETS.bat`** desde el código fuente
-2. Igual que Opción 1
+---
 
-### Opción 3: Instalación Manual
+### Opción 4: Línea de Comandos (Desarrollo)
 
 ```bash
 # Crear entorno virtual
@@ -185,7 +209,22 @@ El sistema funciona en red local (LAN) sin necesidad de internet:
 
 ## � Compilación (PyInstaller)
 
-Para compilar una nueva versión del instalador:
+### ¿Por qué el `.exe` no está en GitHub?
+
+Los archivos binarios compilados están **ignorados en `.gitignore`**:
+- `dist/` — Carpeta de distribución (~174 MB)
+- `build/` — Archivos temporales de compilación
+- `*.exe` — Ejecutables compilados
+
+**Razón:** Mantener el repositorio ligero (~20 MB en lugar de 200+ MB)
+
+**Soluciones:**
+- ✅ Descargar `.exe` precompilado desde [GitHub Releases](https://github.com/GoodIsaac18/tickets/releases)
+- ✅ Compilar localmente siguiendo instrucciones de "Opción 2" arriba
+
+---
+
+### Instrucciones de Compilación
 
 ```bash
 # Limpiar compilaciones anteriores
