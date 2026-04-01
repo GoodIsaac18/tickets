@@ -356,14 +356,15 @@ class InstaladorGrafico:
         es_menu = vista_id == "menu"
         mostrar_pasos = (self.modo == "instalar" and vista_id in self.VISTA_A_PASO)
 
-        columna = []
+        # Construir contenido con header si no es menú
+        items_contenido = []
         if not es_menu:
-            columna.append(self._crear_header(mostrar_pasos))
+            items_contenido.append(self._crear_header(mostrar_pasos))
         
-        # El scroll debe estar en Column, no en Container
-        columna.append(
+        # Agregar contenido con padding
+        items_contenido.append(
             ft.Container(
-                content=ft.Column([contenido], scroll=ft.ScrollMode.AUTO, expand=True),
+                content=contenido,
                 expand=True,
                 padding=30 if not es_menu else 0,
             )
@@ -371,7 +372,7 @@ class InstaladorGrafico:
 
         self.page.add(
             ft.Container(
-                content=ft.Column(columna, spacing=0, expand=True),
+                content=ft.Column(items_contenido, spacing=0, expand=True, scroll=ft.ScrollMode.AUTO),
                 expand=True,
                 bgcolor=COLOR_FONDO,
             )
