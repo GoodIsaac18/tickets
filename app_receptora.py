@@ -15,6 +15,7 @@ from flet import (
     TextAlign, Icons as icons, Icon, Divider, Card, ListView, ListTile,
     ScrollMode, Switch, Badge, ProgressBar, Stack
 )
+from pathlib import Path
 import pandas as pd
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -6997,10 +6998,6 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    # establecer icono de ventana si existe
+    # establecer assets si existen
     assets = str(Path(__file__).parent)
-    ico = Path(assets) / "icons" / "receptora.ico"
-    if ico.exists():
-        ft.run(main, assets_dir=assets, window_icon=str(ico))
-    else:
-        ft.run(main, assets_dir=assets)
+    ft.run(main, assets_dir=assets)
