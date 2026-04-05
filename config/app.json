@@ -1,0 +1,58 @@
+{
+  "app": {
+    "nombre": "Sistema de Soporte Técnico",
+    "version": "5.0.0",
+    "modo": "produccion"
+  },
+  "servidor": {
+    "host": "127.0.0.1",
+    "puerto_http": 5555,
+    "puerto_websocket": 5556,
+    "timeout_segundos": 30,
+    "heartbeat_intervalo_segundos": 30,
+    "workers_threads": 4
+  },
+  "licencias": {
+    "enabled": true,
+    "puerto": 8787,
+    "validation_intervalo_segundos": 3600,
+    "offline_grace_horas": 24,
+    "modo_estricto": true
+  },
+  "database": {
+    "tipo": "sqlite",
+    "wal_mode": true,
+    "timeout_conexion_segundos": 30,
+    "auto_backup": true,
+    "backup_intervalo_horas": 6
+  },
+  "logging": {
+    "nivel": "INFO",
+    "formato": "json",
+    "archivo_prefijo": "tickets",
+    "rotacion_dias": 30,
+    "max_tamaño_mb": 100,
+    "salida_consola": true,
+    "salida_archivo": true
+  },
+  "ui": {
+    "tema": "oscuro",
+    "idioma": "es",
+    "ancho_ventana": 1200,
+    "alto_ventana": 700
+  },
+  "security": {
+    "rate_limit_requests": 100,
+    "rate_limit_ventana_segundos": 60,
+    "encrypt_tokens": true,
+    "audit_log": true,
+    "require_https_production": false
+  },
+  "features": {
+    "websocket_realtime": true,
+    "notificaciones_windows": true,
+    "auto_update": true,
+    "exportar_excel": true,
+    "backup_restore": true
+  }
+}

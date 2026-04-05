@@ -14,7 +14,10 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-DB_PATH = Path(__file__).parent / "tickets.db"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_DIR = PROJECT_ROOT / "runtime"
+RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = RUNTIME_DIR / "tickets.db"
 
 TECNICOS_INICIALES = [
     {"id": "TEC001", "nombre": "Carlos Rodriguez",  "especialidad": "Hardware/Red",
@@ -167,7 +170,7 @@ def main():
     print("=" * 62)
     print("  INICIALIZACION DE BASE DE DATOS — Sistema de Tickets v5.0.0")
     print("=" * 62)
-    print(f"\n  Ubicacion: {Path(__file__).parent}")
+    print(f"\n  Ubicacion: {PROJECT_ROOT}")
 
     reset = "--reset" in sys.argv
 

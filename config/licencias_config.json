@@ -1,0 +1,19 @@
+{
+  "licencias": {
+    "enabled": true,
+    "server_url": "http://127.0.0.1:8787",
+    "empresa": "DEFAULT",
+    "timeout_segundos": 5,
+    "offline_grace_horas": 24,
+    "modo_estricto": true
+  },
+  "validacion": {
+    "intervalo_minutos": 60,
+    "reintentos": 3,
+    "delay_reintento_segundos": 5
+  },
+  "storage": {
+    "ubicacion": "runtime/",
+    "archivo_estado": "licencia_estado.json"
+  }
+}

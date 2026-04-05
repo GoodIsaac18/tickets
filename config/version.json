@@ -1,0 +1,41 @@
+{
+    "version": "6.0.0",
+    "fecha": "2026-04-05",
+    "critico": false,
+    "descripcion": "Version 6.0.0 estable: raiz reorganizada, Kubo/Kubito independientes, sin instalador legado y con mejoras de estabilidad/licencias",
+    "cambios": [
+        "Correccion de errores de UI en busqueda global de receptora (compatibilidad Flet 0.81)",
+        "Eliminacion del bloque visual grande en busqueda y simplificacion de filtros",
+        "Correccion de errores runtime en Alignment/Container y estabilidad del boton Buscar",
+        "Mejoras importantes en sistema de licencias: validaciones, endpoints admin y control de seguridad",
+        "Hardening de red LAN: rate limiting, CORS y limites de payload",
+        "Health checks y logging JSON para monitoreo operativo",
+        "Mejoras de backup/restore y recuperacion",
+        "Ajuste de launchers para evitar RuntimeWarning por doble carga con runpy",
+        "Reorganizacion de raiz y estructura de proyecto para despliegue mas limpio",
+        "Retiro del instalador obsoleto y separacion de apps finales Kubo/Kubito",
+        "Documentacion de release y cambios para despliegue estable"
+    ],
+    "archivos_nuevos": [
+        "config/app.json",
+        "config/version.json",
+        "config/licencias_config.json",
+        "src/core/logger.py",
+        "src/core/backup.py",
+        "scripts/backup_database.py",
+        "tests/test_data_access.py",
+        "tests/test_license_client.py",
+        ".github/workflows/tests.yml"
+    ],
+    "archivos_modificados": [
+        "src/core/servidor_red.py (health checks)",
+        "src/apps/licencias/server.py (health + logging)",
+        "src/apps/emisora/app.py (validación)",
+        "src/apps/receptora/app.py (validación)",
+        "src/core/data_access.py (logging)",
+        "README.md",
+        ".gitignore (config/* excepto defaults)"
+    ],
+    "notas": "Release recomendado para produccion: mayor estabilidad general y mejoras sustanciales en licenciamiento",
+    "compatibilidad": "Windows 10/11, Python 3.11+"
+}

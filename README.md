@@ -1,413 +1,82 @@
-# 🎫 Sistema de Gestión de Tickets IT — v4.0.0
+﻿# Kubo y Kubito - Sistema de Gestion de Tickets IT - v6.0.0
 
-Sistema completo de dos aplicaciones de escritorio desarrolladas en Python con **Flet 0.81** para la gestión del ciclo de vida de tickets de soporte técnico. Las aplicaciones se comunican por red local (LAN) sin necesidad de internet, e incluyen un **instalador profesional** con actualización automática desde GitHub.
+Sistema empresarial de dos aplicaciones de escritorio desarrolladas en Python 3.11 y Flet 0.81 para la gestion completa de tickets de soporte tecnico en LAN.
 
-> **Nota:** Versión compilada disponible en `dist/Instalador_Tickets_4.0.0/` (174 MB) — No requiere Python instalado.
+## Novedades v6.0.0
 
----
+- Estabilizacion de la vista de busqueda global en receptora.
+- Correccion de errores runtime de UI en Flet (alignment y propiedades de contenedor).
+- Simplificacion de la seccion de busqueda y eliminacion del bloque visual excesivo.
+- Mejoras importantes del sistema de licencias (validaciones, endpoints admin y controles de seguridad).
+- Hardening de red LAN con rate limit, CORS y limites de payload.
+- Logging JSON y health checks para monitoreo operativo.
+- Ajustes de launchers emisora/receptora para evitar advertencias de doble carga con runpy.
+- Reorganizacion de la raiz y la estructura general del proyecto para despliegue mas limpio.
+- Eliminacion del instalador legado: ahora Kubo y Kubito se ejecutan de forma independiente.
 
-## 📋 Estructura del Proyecto
+## Estructura principal
 
-```
-tickets/
-├── app_emisora.py              # Aplicación para trabajadores (crear tickets)
-├── app_receptora.py            # Panel IT (gestión, técnicos, reportes)
-├── data_access.py              # Módulo de acceso a datos (SQLite)
-├── servidor_red.py             # Servidor HTTP para comunicación LAN (puerto 5555)
-├── ws_server.py                # Servidor WebSocket en tiempo real (puerto 5556)
-├── notificaciones_windows.py   # Sistema de notificaciones Windows
-├── servicio_notificaciones.py  # Servicio de notificaciones en segundo plano
-├── instalador.py               # Instalador gráfico profesional (Flet UI)
-├── actualizador_github.py      # Sistema de actualizaciones automáticas
-├── requirements.txt            # Dependencias del proyecto
-├── ejecutar_emisora.bat        # Lanzador App Trabajadores
-├── ejecutar_receptora.bat      # Lanzador Panel IT
-├── launcher_emisora.vbs        # Launcher silencioso Emisora (con rutas dinámicas)
-├── launcher_receptora.vbs      # Launcher silencioso Receptora (con rutas dinámicas)
-├── servidor_config.txt         # Configuración del servidor (IP:Puerto)
-├── equipos_aprobados.json      # Equipos aprobados por el técnico
-├── solicitudes_enlace.json     # Solicitudes de enlace pendientes
-├── tickets.db                  # Base de datos SQLite (se crea automáticamente)
-├── icons/                      # Iconos de las aplicaciones
-│   ├── emisora.ico / .png
-│   └── receptora.ico / .png
-├── dist/                       # Binarios compilados (PyInstaller --onedir)
-│   └── Instalador_Tickets_4.0.0/
-│       └── Instalador_Tickets_4.0.0.exe
-├── python_embed/               # Python 3.11.9 embebido
-└── backups/                    # Backups automáticos de actualizaciones
-```
+- `src/apps/` aplicaciones principales: emisora, receptora y licencias.
+- `src/core/` infraestructura compartida: DB, red, websocket, logging, backup y validadores.
+- `frontend/licencias-panel-react/` panel web de licencias.
+- `config/` configuracion centralizada.
+- `runtime/` datos operativos (db, logs, backups, estados).
+- `scripts/` utilidades de operacion.
+- `docs/` documentacion tecnica y operativa.
 
----
+## Apps finales
 
-## 🚀 Instalación
+- `Kubo`: aplicacion receptora (panel IT / administracion).
+- `Kubito`: aplicacion emisora (cliente para crear tickets).
+- Ambos entrypoints son independientes y estan en raiz:
+  - `kubo.py`
+  - `kubito.py`
 
-### ⭐ Opción 1: Descargar Compilado (Recomendado)
-
-**El `.exe` precompilado NO incluido en el repositorio** (está en `.gitignore`).
-
-**Descargar desde:** [GitHub Releases](https://github.com/GoodIsaac18/tickets/releases)
-
-1. Ir a la página de Releases del proyecto
-2. Descargar `Instalador_Tickets_4.0.0.zip` (~174 MB)
-3. Extraer archivo
-4. Ejecutar `Instalador_Tickets_4.0.0\Instalador_Tickets_4.0.0.exe`
-
-**Ventaja:** No requiere Python, solo ejecutar el `.exe`
-
----
-
-### Opción 2: Compilar desde Código Fuente
-
-Si clonaste el repositorio y quieres generar el `.exe` localmente:
+## Inicio rapido
 
 ```bash
-# Posicionarse en la raíz del proyecto
-cd tickets-main
-
-# Limpiar compilaciones anteriores
-Remove-Item -Path "dist", "build" -Recurse -Force -ErrorAction SilentlyContinue
-
-# Compilar con PyInstaller
-.\python_embed\python.exe -m PyInstaller `
-  --onedir `
-  --windowed `
-  --name "Instalador_Tickets_4.0.0" `
-  --icon="icons/receptora.ico" `
-  --add-data "icons:icons" `
-  --collect-all flet `
-  --collect-all flet_desktop `
-  --hidden-import=flet.controls.material.icons `
-  --hidden-import=flet_desktop `
-  --hidden-import=pandas `
-  --hidden-import=openpyxl `
-  instalador.py
+./python_embed/python.exe kubo.py
+./python_embed/python.exe kubito.py
 ```
 
-**Resultado:** `dist/Instalador_Tickets_4.0.0/Instalador_Tickets_4.0.0.exe`
-
----
-
-### Opción 3: Instalador Gráfico desde Fuente
-
-Si tienes el código fuente:
-
-1. Ejecutar **`SISTEMA_TICKETS.bat`** en la raíz del proyecto
-2. El instalador se compile y ejecutará automáticamente
-
----
-
-### Opción 4: Línea de Comandos (Desarrollo)
+## Health checks
 
 ```bash
-# Crear entorno virtual
-python -m venv venv
-venv\Scripts\activate
-
-# Instalar dependencias
-pip install -r requirements.txt
-
-# Ejecutar
-python app_emisora.py    # Trabajadores
-python app_receptora.py  # Panel IT
+curl http://localhost:5555/health
+curl http://localhost:8787/health
 ```
 
----
-
-## 💻 Aplicaciones
-
-### 🎫 App Emisora (Para Trabajadores)
-
-Interfaz moderna e intuitiva para crear tickets de soporte.
-
-**Características:**
-- ✅ Captura automática de: Usuario AD, Hostname, MAC Address
-- ✅ Formulario de ticket con categorías predefinidas
-- ✅ Sistema de turnos tipo banco (A-001, A-002...)
-- ✅ Panel de ticket activo con estado en tiempo real
-- ✅ Configuración de conexión (detección automática + manual)
-- ✅ Notificaciones de cambio de estado del ticket
-- ✅ Opciones: Recordar ticket, Cancelar ticket
-- ✅ Diálogo de turno con cierre correcto (fix v3.3)
-- ✅ Panel de seguimiento visible después de enviar ticket (fix v3.3)
-
-**Acceso a Configuración:** Clic en el icono ⚙️ en la esquina superior derecha
-
-### 🖥️ App Receptora (Panel IT)
-
-Panel completo de administración para técnicos de soporte.
-
-**Módulos disponibles:**
-
-| Módulo | Descripción |
-|--------|-------------|
-| 📊 **Dashboard** | KPIs en tiempo real, tickets abiertos/proceso/cerrados, equipos conectados |
-| 🎫 **Tickets** | Lista con filtros, asignar técnico, cambiar estado, notas, historial |
-| 👥 **Técnicos** | Gestión de técnicos, estado, especialización, contacto |
-| 🔗 **Equipos** | Solicitudes de enlace, aprobar/rechazar, revocar, equipos online |
-| 📈 **Reportes** | Resumen general, análisis por categoría/prioridad, rendimiento, tendencias, exportar a Excel |
-
----
-
-## 🔄 Sistema de Actualizaciones (v3.3 — Nuevo)
-
-El instalador incluye un sistema completo de actualización automática desde GitHub.
-
-### Flujo de actualización:
-
-```
-1. Verificar WiFi conectado (netsh)
-2. Verificar acceso a Internet (SSL → github.com:443)
-3. Conectar a API de GitHub (commits + version.json)
-4. Comparar hashes SHA-256 de archivos locales vs remotos
-5. Mostrar changelog con commits recientes
-6. Descargar archivos diferentes con backup automático
-7. Validar sintaxis Python (.py) antes de escribir
-8. Actualizar install_info.json con nueva versión
-```
-
-### Módulo: `actualizador_github.py`
-
-| Función | Descripción |
-|---------|-------------|
-| `verificar_wifi_conectado()` | Detecta conexión WiFi activa via `netsh` |
-| `verificar_conexion_internet()` | Prueba SSL a github.com:443 |
-| `verificar_conexion_github()` | Valida acceso a la API de GitHub |
-| `obtener_commits_recientes()` | Obtiene últimos N commits del repo |
-| `obtener_version_remota()` | Lee `version.json` del repositorio |
-| `hay_actualizacion_disponible()` | Compara versión local vs remota |
-| `obtener_archivos_diferentes()` | Compara SHA-256 local vs remoto |
-| `ejecutar_actualizacion()` | Descarga, valida y aplica parches con backup |
-| `calcular_hash_archivo()` | SHA-256 de un archivo local |
-
-**Repositorio:** `https://github.com/GoodIsaac18/tickets.git`  
-**Branch:** `main`  
-**Sin token requerido** — usa la API pública de GitHub con `urllib`
-
----
-
-## 🌐 Comunicación en Red
-
-El sistema funciona en red local (LAN) sin necesidad de internet:
-
-- **Servidor HTTP** en puerto 5555 (configurable)
-- **Descubrimiento automático** de servidor en la red
-- **Sistema de enlace** para aprobar equipos
-- **Heartbeat** para detectar equipos online/offline
-- **Comunicación bidireccional** en tiempo real
-
-### Flujo de conexión:
-
-1. La Receptora inicia el servidor al arrancar
-2. La Emisora busca automáticamente el servidor en la red
-3. Si no lo encuentra, permite configuración manual
-4. Al conectarse, Emisora envía solicitud de enlace
-5. El técnico en Receptora aprueba/rechaza el equipo
-6. Una vez aprobado, el equipo puede enviar tickets
-
----
-
-## � Compilación (PyInstaller)
-
-### ¿Por qué el `.exe` no está en GitHub?
-
-Los archivos binarios compilados están **ignorados en `.gitignore`**:
-- `dist/` — Carpeta de distribución (~174 MB)
-- `build/` — Archivos temporales de compilación
-- `*.exe` — Ejecutables compilados
-
-**Razón:** Mantener el repositorio ligero (~20 MB en lugar de 200+ MB)
-
-**Soluciones:**
-- ✅ Descargar `.exe` precompilado desde [GitHub Releases](https://github.com/GoodIsaac18/tickets/releases)
-- ✅ Compilar localmente siguiendo instrucciones de "Opción 2" arriba
-
----
-
-### Instrucciones de Compilación
+## Backup y logging
 
 ```bash
-# Limpiar compilaciones anteriores
-Remove-Item -Path "dist", "build" -Recurse -Force -ErrorAction SilentlyContinue
-
-# Compilar con todas las dependencias incluidas
-.\python_embed\python.exe -m PyInstaller `
-  --onedir `
-  --windowed `
-  --name "Instalador_Tickets_4.0.0" `
-  --icon="icons/receptora.ico" `
-  --add-data "icons:icons" `
-  --collect-all flet `
-  --collect-all flet_desktop `
-  --hidden-import=flet.controls.material.icons `
-  --hidden-import=flet_desktop `
-  --hidden-import=pandas `
-  --hidden-import=openpyxl `
-  instalador.py
+python scripts/backup_database.py
 ```
 
-**Resultado:** `dist/Instalador_Tickets_4.0.0/Instalador_Tickets_4.0.0.exe` (~174 MB)
+Logs en:
 
-### Flags importantes:
+- `runtime/logs/tickets.log`
+- `runtime/logs/licencias.log`
+- `runtime/logs/api.log`
 
-| Flag | Descripción |
-|------|-------------|
-| `--onedir` | Directorio con todos los archivos (mejor para actualizaciones) |
-| `--windowed` | Sin consola (aplicación de escritorio) |
-| `--collect-all flet` | Incluye TODOS los recursos de Flet (assets, fuentes) |
-| `--collect-all flet_desktop` | Incluye binarios de Flet Desktop (`app/flet`) |
-| `--hidden-import=` | Importaciones dinámicas no detectadas automáticamente |
+## Seguridad
 
----
+- Validacion y sanitizacion centralizada de entradas.
+- Rate limiting en APIs.
+- Controles de CORS y payload.
+- Health checks para monitoreo.
 
-## �📊 Base de Datos (SQLite)
+## Produccion empresarial
 
-**Archivo:** `tickets.db` (creado automáticamente al primer arranque)
+- Script recomendado: `scripts/start_produccion_segura.ps1`
+- Configuracion de firewall: `scripts/configurar_firewall_empresarial.ps1`
+- Guia: `docs/PRODUCCION_EMPRESARIAL.md`
 
-Usa SQLite con WAL mode — incluido en Python estándar, cero instalación adicional.
+## Instalador legado
 
-### Tabla: `tickets`
+El instalador anterior fue retirado en v6.0.0 por obsoleto.
+La ejecucion recomendada es directa e independiente con `kubo.py` y `kubito.py`.
 
-| Campo | Descripción |
-|-------|-------------|
-| ID_TICKET | Identificador único (UUID) |
-| TURNO | Número de turno (ej: A-001) |
-| FECHA_APERTURA | Fecha y hora de creación |
-| USUARIO_AD | Usuario de Active Directory |
-| HOSTNAME | Nombre del equipo |
-| MAC_ADDRESS | Dirección MAC |
-| CATEGORIA | Hardware, Software, Red, etc. |
-| PRIORIDAD | Baja, Media, Alta, Crítica |
-| DESCRIPCION | Descripción del problema |
-| ESTADO | Abierto, En Cola, En Proceso, En Espera, Cerrado, Cancelado |
-| TECNICO_ASIGNADO | Técnico responsable |
-| NOTAS_RESOLUCION | Notas de cierre |
-| HISTORIAL | Historial de cambios |
-| FECHA_CIERRE | Fecha de resolución |
+## Linea de versiones
 
-### Tabla: `tecnicos`
-
-| Campo | Descripción |
-|-------|-------------|
-| ID_TECNICO | Identificador único |
-| NOMBRE | Nombre completo |
-| EMAIL | Correo electrónico |
-| TELEFONO | Teléfono de contacto |
-| ESPECIALIDAD | Área de especialización |
-| ESTADO | Disponible / Ocupado / Ausente |
-
-### Tablas adicionales: `equipos`, `red`, `counters`
-
----
-
-## 🔧 Características Técnicas
-
-| Componente | Tecnología |
-|------------|------------|
-| **Framework UI** | Flet 0.81 (Flutter para Python) |
-| **Base de datos** | SQLite (`sqlite3` stdlib, WAL mode, cero instalación) |
-| **Servidor HTTP** | ThreadedHTTPServer nativo (puerto 5555) |
-| **Tiempo real** | WebSocket (`websockets>=12.0`, puerto 5556) |
-| **Plataforma** | Windows 10/11 con Python 3.11+ embebido |
-| **Notificaciones** | Windows Toast Notifications (winotify) |
-| **Red** | netsh (WiFi), getmac (MAC), socket (LAN) |
-
----
-
-## 📦 Dependencias
-
-```
-flet>=0.21.0
-pandas>=2.0.0
-openpyxl>=3.1.0    # requerido solo para exportar reportes a Excel
-getmac>=0.9.0
-winotify>=1.1.0
-websockets>=12.0   # sincronización en tiempo real entre emisora y receptora
-# sqlite3 ya viene incluido con Python — sin instalación adicional
-```
-
----
-
-## 🎨 Diseño
-
-### App Emisora (Modo Claro)
-- Gradiente azul-violeta en header
-- Interfaz limpia y minimalista
-- Icono verde con ticket
-
-### App Receptora (Modo Oscuro)
-- Panel lateral con navegación
-- Cards con información en tiempo real
-- Icono azul con monitor
-
-### Instalador (Modo Oscuro)
-- UI profesional con wizard paso a paso
-- Barra de progreso animada
-- Vista de actualizaciones con changelog en vivo
-
----
-
-## 📝 Historial de Versiones
-
-### v4.0.0 — 1 de Abril 2026 (Actual)
-- ✅ **Compilación profesional con PyInstaller** (`--onedir`)
-  - Ejecutable independiente: `Instalador_Tickets_4.0.0.exe` (174 MB)
-  - Incluye Python 3.11.9 embebido + todas las dependencias
-  - No requiere instalación previa de Python
-  - Todos los binarios de Flet Desktop incluidos
-- ✅ **Rutas dinámicas en VBS launchers** (fix para múltiples Windows locales)
-  - `launcher_receptora.vbs` y `launcher_emisora.vbs` actualizados
-  - Usan `GetParentFolderName()` en lugar de rutas hardcodeadas
-  - Funciona en cualquier camino de instalación
-- ✅ **Fix: Flet Icons error** — Agregadas dependencias ocultas (`--hidden-import`)
-- ✅ **Limpieza de archivos obsoletos**
-  - Eliminados: `actualizar.py`, `actualizar_v3.2.py`, `actualizar_v3.3.py`
-  - Eliminados: `app_emisora_backup.py`, `generar_iconos.py`, `instalador_backup.py`
-  - Repositorio más limpio y mantenible
-- ✅ **Version.json** actualizado a 4.0.0
-
-### v3.3.0 — 5 de Marzo 2026
-- ✅ **Sistema de actualización automática desde GitHub**
-  - Verificación de WiFi / Internet / GitHub
-  - Comparación de archivos por SHA-256
-  - Descarga con backup automático
-  - Validación de sintaxis Python antes de aplicar
-- ✅ **Fix: Botón "Entendido" no cerraba** — `modal=False` + `ft.TextButton` en actions
-- ✅ **Fix: Panel de seguimiento invisible** — Ticket guardado en memoria + fallback
-- ✅ **Fix: Scroll en vista Actualizar** — `scroll=ft.ScrollMode.AUTO` en Column
-- ✅ **Nuevo módulo:** `actualizador_github.py` (~500 líneas)
-- ✅ **Nuevo archivo:** `version.json` para control de versiones remoto
-
-### v3.0.0 — Marzo 2026
-- ✅ Instalador gráfico profesional con Flet UI
-- ✅ Detección de instalación existente
-- ✅ Desinstalación completa
-- ✅ Sistema de reportes profesional con exportación Excel
-- ✅ Animaciones de carga en operaciones de la Receptora
-- ✅ Formateo mejorado en base de datos
-
-### v2.0.0 — Febrero 2026
-- ✅ Sistema de tickets completo (crear, asignar, resolver, cerrar)
-- ✅ Comunicación LAN sin internet
-- ✅ Sistema de enlace de equipos
-- ✅ Dashboard con estadísticas
-- ✅ Gestión de técnicos
-- ✅ Notificaciones de Windows
-
----
-
-## 🐛 Problemas Conocidos y Soluciones
-
-| Problema | Causa | Solución | Estado |
-|----------|-------|----------|--------|
-| `scroll` en `Container` o `Row` falla | Flet 0.81 solo soporta scroll en `Column` | Mover `scroll=` a parent `Column` | ✅ Resuelto v4.0.0 |
-| Flet Icons cargan en error (FileNotFoundError) | Falta incluir binarios de `flet_desktop` | PyInstaller con `--collect-all flet_desktop` | ✅ Resuelto v4.0.0 |
-| Launchers VBS fallan en diferentes rutas | Rutas hardcodeadas | Usar `GetParentFolderName()` dinámico | ✅ Resuelto v4.0.0 |
-| `modal=True` bloquea clics en Flet 0.81 | Bug de Flet | Usar `modal=False` + `on_dismiss` | ✅ Resuelto v3.3.0 |
-| Ticket no aparece después de enviar | Servidor no retorna datos localmente | Guardar en `self.ticket_activo` + fallback | ✅ Resuelto v3.3.0 |
-
----
-
-## 📄 Licencia
-
-© 2026 — Departamento de Tecnología de la Información
+- v6.0.0 (2026-04-05): version estable con multiples correcciones, raiz reorganizada, mejoras de licencias y separacion Kubo/Kubito sin instalador legado.
+- v5.0.0 (2026-04-04): base de arquitectura modular, logging y health checks.

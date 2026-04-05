@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "server_url": "http://127.0.0.1:8787",
+  "offline_grace_hours": 24,
+  "timeout_seconds": 5,
+  "empresa": "DEFAULT",
+  "strict_mode": false
+}

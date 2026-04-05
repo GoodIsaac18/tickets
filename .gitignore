@@ -1,45 +1,96 @@
-# Archivos de Python
+# === Python ===
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+*.egg-info/
+.coverage
+htmlcov/
 
-# Archivos de datos locales (no subir bases de datos)
-tickets_db.xlsx
-tecnicos_db.xlsx
-equipos_db.xlsx
-red_db.xlsx
-equipos_aprobados.json
-solicitudes_enlace.json
-notificaciones_estado.json
+# === Datos Operacionales (v5.0) ===
+# Nunca subir runtime/ — contiene archivos generados localmente
+runtime/
+!runtime/.gitkeep
+
+# Logs con rotación automática
+runtime/logs/
+!runtime/logs/.gitkeep
+
+# Backups comprimidos
+runtime/backups/
+!runtime/backups/.gitkeep
+
+# === Base de Datos ===
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# === Archivos de Estado & Configuración Local ===
 servidor_config.txt
-ruta_actualizaciones.txt
-actualizacion_config.txt
+notificaciones_estado.json
+licencia_estado.json
 install_info.json
 update_state.json
-version.txt
 
-# Reportes generados
+# === Historiales Heredados (v4 y anteriores) ===
+equipos_aprobados.json
+solicitudes_enlace.json
+ruta_actualizaciones.txt
+actualizacion_config.txt
+
+# === Reportes Generados ===
 reporte_*.xlsx
+tickets_export_*.csv
+*.xlsx
+*.csv
 
-# Python embebido (muy grande para GitHub)
+# === Python Embebido ===
 python_embed/
+!python_embed/.gitkeep
 
-# Build y distribución
+# === Node/Frontend ===
+node_modules/
+frontend/licencias-panel-react/dist/
+frontend/licencias-panel-react/build/
+.env.local
+.env.*.local
+
+# === Build & Distribución ===
 build/
 dist/
 *.spec
 *.exe
+*.msi
 
-# Backups locales
-backups/
-
-# Entorno virtual
+# === Entorno Virtual ===
+venv/
+ENV/
+env/
 .venv/
 
-# Archivos temporales
+# === Archivos Temporales ===
 *.log
 *.tmp
+*.temp
+*.swp
+.DS_Store
+Thumbs.db
 
-# IDE
+# === IDE & Editor ===
 .vscode/
 .idea/
+*.sublime-project
+*.sublime-workspace
+.env
+
+# === Backups de Sistema ===
+*.bak
+*.orig
+.vscode/
+.idea/
+
+# Frontend React panel
+licencias-panel-react/node_modules/
+licencias-panel-react/dist/
