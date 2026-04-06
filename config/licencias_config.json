@@ -5,7 +5,8 @@
     "empresa": "DEFAULT",
     "timeout_segundos": 5,
     "offline_grace_horas": 24,
-    "modo_estricto": true
+    "modo_estricto": true,
+    "activation_key": ""
   },
   "validacion": {
     "intervalo_minutos": 60,

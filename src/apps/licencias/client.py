@@ -44,7 +44,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "timeout_seconds": 5,
     "empresa": "DEFAULT",
     "strict_mode": True,
+    "activation_key": "",
 }
+
+TRIAL_LICENSE_KEY = os.getenv("TICKETS_LICENSE_TRIAL_KEY", "KUBO-TRIAL-7D-GRATIS").strip().upper()
 
 
 @dataclass
@@ -52,6 +55,9 @@ class LicenseResult:
     allowed: bool
     message: str
     reason: str
+    license_mode: Optional[str] = None
+    trial_expires_at: Optional[str] = None
+    server_time_utc: Optional[str] = None
     device_ip: Optional[str] = None
     device_mac: Optional[str] = None
     server_ip: Optional[str] = None
@@ -83,6 +89,21 @@ def _load_config() -> Dict[str, Any]:
         _write_json(CONFIG_PATH, config)
 
     return config
+
+
+def guardar_activation_key(activation_key: str) -> None:
+    """Guarda la key de activacion en estado local para siguiente validacion."""
+    key = str(activation_key or "").strip()
+    state = _read_json(STATE_PATH)
+    state["activation_key"] = key
+    _write_json(STATE_PATH, state)
+
+
+def limpiar_activation_key() -> None:
+    """Limpia la key de activacion local cuando se desea forzar reactivacion."""
+    state = _read_json(STATE_PATH)
+    state.pop("activation_key", None)
+    _write_json(STATE_PATH, state)
 
 
 def _installation_id(state: Dict[str, Any]) -> str:
@@ -168,7 +189,7 @@ def _post_json(url: str, payload: Dict[str, Any], timeout_seconds: int) -> Dict[
         return json.loads(body)
 
 
-def validar_licencia_inicio(app_id: str, app_version: str) -> LicenseResult:
+def validar_licencia_inicio(app_id: str, app_version: str, request_trial: bool = False) -> LicenseResult:
     config = _load_config()
 
     if not config.get("enabled", True):
@@ -192,6 +213,8 @@ def validar_licencia_inicio(app_id: str, app_version: str) -> LicenseResult:
         "mac_hash": hashlib.sha256(mac_local.encode("utf-8", errors="ignore")).hexdigest(),
         "fingerprint": fingerprint,
         "token": state.get("token", ""),
+        "activation_key": str(state.get("activation_key") or config.get("activation_key", "")).strip(),
+        "request_trial": bool(request_trial),
     }
 
     server_url = str(config.get("server_url", "")).rstrip("/")
@@ -202,8 +225,21 @@ def validar_licencia_inicio(app_id: str, app_version: str) -> LicenseResult:
     except (URLError, HTTPError, TimeoutError, OSError, ValueError):
         strict_mode = bool(config.get("strict_mode", True))
         if strict_mode:
+            if state.get("license_mode") == "trial":
+                return LicenseResult(
+                    False,
+                    "La prueba gratuita requiere validación en línea y no puede continuar sin servidor.",
+                    "trial_offline_blocked",
+                    license_mode="trial",
+                    trial_expires_at=str(state.get("trial_expires_at", "")).strip() or None,
+                    device_ip=ip_local,
+                    device_mac=mac_local,
+                )
+
+            activation_token = str(state.get("activation_token", "")).strip()
+            activation_expires_at = str(state.get("activation_expires_at", "")).strip()
             last_ok = state.get("last_ok_utc")
-            if last_ok:
+            if activation_token and activation_expires_at and last_ok:
                 try:
                     dt = datetime.fromisoformat(last_ok)
                     if dt.tzinfo is None:
@@ -213,6 +249,8 @@ def validar_licencia_inicio(app_id: str, app_version: str) -> LicenseResult:
                             True,
                             "Sin conexión con servidor de licencias. En ventana de gracia.",
                             "offline_grace",
+                            license_mode="licensed",
+                            server_time_utc=str(state.get("last_server_utc", "")).strip() or None,
                             device_ip=ip_local,
                             device_mac=mac_local,
                         )
@@ -237,10 +275,25 @@ def validar_licencia_inicio(app_id: str, app_version: str) -> LicenseResult:
     allowed = bool(data.get("allowed", False))
     message = str(data.get("message", "Sin mensaje del servidor."))
     reason = str(data.get("reason", "unknown"))
+    license_mode = str(data.get("license_mode", "")).strip() or None
+    trial_expires_at = str(data.get("trial_expires_at", "")).strip() or None
+    server_time_utc = str(data.get("server_time_utc", "")).strip() or None
 
     if allowed:
         state["token"] = data.get("token") or state.get("token")
-        state["last_ok_utc"] = _now().isoformat()
+        if data.get("activation_token"):
+            state["activation_token"] = data.get("activation_token")
+        if data.get("activation_expires_at"):
+            state["activation_expires_at"] = data.get("activation_expires_at")
+        if trial_expires_at:
+            state["trial_expires_at"] = trial_expires_at
+        if license_mode:
+            state["license_mode"] = license_mode
+        if server_time_utc:
+            state["last_server_utc"] = server_time_utc
+        if payload.get("activation_key"):
+            state["activation_key"] = payload.get("activation_key")
+        state["last_ok_utc"] = server_time_utc or _now().isoformat()
         state["last_reason"] = reason
         state["installation_id"] = installation_id
         _write_json(STATE_PATH, state)
@@ -248,6 +301,9 @@ def validar_licencia_inicio(app_id: str, app_version: str) -> LicenseResult:
             True,
             message,
             reason,
+            license_mode=license_mode,
+            trial_expires_at=trial_expires_at,
+            server_time_utc=server_time_utc,
             device_ip=ip_local,
             device_mac=mac_local,
             server_ip=str(data.get("server_ip", "")) or None,
@@ -255,11 +311,60 @@ def validar_licencia_inicio(app_id: str, app_version: str) -> LicenseResult:
 
     state["last_reason"] = reason
     state["installation_id"] = installation_id
+    if license_mode:
+        state["license_mode"] = license_mode
+    if trial_expires_at:
+        state["trial_expires_at"] = trial_expires_at
+    if server_time_utc:
+        state["last_server_utc"] = server_time_utc
+    if payload.get("activation_key"):
+        state["activation_key"] = payload.get("activation_key")
     _write_json(STATE_PATH, state)
+
+    if config.get("strict_mode", True):
+        if state.get("license_mode") == "trial" or reason in {"trial_started", "trial_active", "trial_expired"}:
+            return LicenseResult(
+                False,
+                "La prueba gratuita requiere validación en línea y no puede continuar sin servidor.",
+                "trial_offline_blocked",
+                license_mode="trial",
+                trial_expires_at=trial_expires_at,
+                server_time_utc=server_time_utc,
+                device_ip=ip_local,
+                device_mac=mac_local,
+                server_ip=str(data.get("server_ip", "")) or None,
+            )
+
+        activation_token = str(state.get("activation_token", "")).strip()
+        activation_expires_at = str(state.get("activation_expires_at", "")).strip()
+        if activation_token and activation_expires_at:
+            last_ok = state.get("last_ok_utc")
+            if last_ok:
+                try:
+                    dt = datetime.fromisoformat(last_ok)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=UTC)
+                    if _now() - dt <= timedelta(hours=grace_hours):
+                        return LicenseResult(
+                            True,
+                            "Sin conexión con servidor de licencias. En ventana de gracia.",
+                            "offline_grace",
+                            license_mode="licensed",
+                            server_time_utc=server_time_utc,
+                            device_ip=ip_local,
+                            device_mac=mac_local,
+                            server_ip=str(data.get("server_ip", "")) or None,
+                        )
+                except Exception:
+                    pass
+
     return LicenseResult(
         False,
         message,
         reason,
+        license_mode=license_mode,
+        trial_expires_at=trial_expires_at,
+        server_time_utc=server_time_utc,
         device_ip=ip_local,
         device_mac=mac_local,
         server_ip=str(data.get("server_ip", "")) or None,

@@ -16,7 +16,7 @@ from pathlib import Path
 import asyncio
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 
 # Importar módulo de acceso a datos
 from data_access import (
@@ -49,16 +49,47 @@ from servidor_red import (
 
 # Validación remota de licencia/control de instalación
 try:
-    from licencias_cliente import validar_licencia_inicio, mostrar_banner_bloqueo
+    from licencias_cliente import validar_licencia_inicio, mostrar_banner_bloqueo, guardar_activation_key, limpiar_activation_key, TRIAL_LICENSE_KEY
 except Exception:
     validar_licencia_inicio = None
     mostrar_banner_bloqueo = None
+    guardar_activation_key = None
+    limpiar_activation_key = None
+    TRIAL_LICENSE_KEY = "KUBO-TRIAL-7D-GRATIS"
 
 # Validación local reutilizable
 try:
     from src.core.validators import InputValidator
 except Exception:
     InputValidator = None
+
+try:
+    from src.core.app_preferences import (
+        get_app_version,
+        load_app_preferences,
+        save_app_preferences,
+        read_license_status,
+        verify_license_now,
+        send_support_report,
+    )
+except Exception:
+    def get_app_version() -> str:
+        return "0.0.0"
+
+    def load_app_preferences(app_id: str) -> Dict[str, Any]:
+        return {"ui": {}, "features": {}, "support": {}}
+
+    def save_app_preferences(app_id: str, prefs: Dict[str, Any]) -> Dict[str, Any]:
+        return prefs
+
+    def read_license_status() -> Dict[str, Any]:
+        return {}
+
+    def verify_license_now(app_id: str) -> Dict[str, Any]:
+        return {"ok": False, "message": "Módulo no disponible"}
+
+    def send_support_report(app_id: str, report_type: str, message: str, contact: str = "", extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        return {"ok": False, "error": "Módulo no disponible"}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_DIR = PROJECT_ROOT / "runtime"
@@ -204,6 +235,12 @@ class AppEmisora:
         self.txt_puerto_servidor: Optional[TextField] = None
         self.lbl_estado_config: Optional[Text] = None
         self.panel_estado_config: Optional[Container] = None
+        self.pref_switch_notificaciones = None
+        self.pref_switch_animaciones = None
+        self.pref_switch_diagnostico = None
+        self.pref_txt_contacto: Optional[TextField] = None
+        self.pref_txt_soporte: Optional[TextField] = None
+        self._prefs = load_app_preferences("kubito")
         
         # Estado
         self.tecnicos_disponibles = []
@@ -1304,6 +1341,53 @@ class AppEmisora:
             self.page.update()
         except:
             pass
+
+    def _guardar_preferencias_locales(self, e=None):
+        """Guarda preferencias locales del usuario para Kubito."""
+        self._prefs.setdefault("ui", {})
+        self._prefs.setdefault("features", {})
+        self._prefs.setdefault("support", {})
+
+        self._prefs["ui"]["mostrar_notificaciones"] = bool(self.pref_switch_notificaciones.value) if self.pref_switch_notificaciones else True
+        self._prefs["ui"]["animaciones"] = bool(self.pref_switch_animaciones.value) if self.pref_switch_animaciones else True
+        self._prefs["features"]["diagnostico_rapido"] = bool(self.pref_switch_diagnostico.value) if self.pref_switch_diagnostico else True
+        if self.pref_txt_contacto:
+            self._prefs["support"]["email"] = self.pref_txt_contacto.value.strip()
+
+        save_app_preferences("kubito", self._prefs)
+        self._actualizar_estado_config("✓ Preferencias guardadas", COLOR_EXITO)
+
+    def _verificar_licencia_manual(self, e=None):
+        """Permite validación manual de licencia desde configuración."""
+        resultado = verify_license_now("emisora")
+        if resultado.get("ok"):
+            self._mostrar_mensaje_exito(resultado.get("message", "Licencia válida"), "Verificación de licencia")
+        else:
+            self._mostrar_error(resultado.get("message", "No se pudo verificar licencia"), "Verificación de licencia")
+
+    def _enviar_reporte_soporte(self, e=None):
+        """Envía sugerencias/errores al servidor de licencias."""
+        if not self.pref_txt_soporte or not self.pref_txt_soporte.value.strip():
+            self._mostrar_advertencia("Escribe un mensaje antes de enviarlo", "Soporte")
+            return
+
+        contact = self.pref_txt_contacto.value.strip() if self.pref_txt_contacto else ""
+        mensaje = self.pref_txt_soporte.value.strip()
+
+        envio = send_support_report(
+            app_id="kubito",
+            report_type="sugerencia",
+            message=mensaje,
+            contact=contact,
+            extra={"hostname": self.hostname, "usuario": self.usuario_ad},
+        )
+
+        if envio.get("ok"):
+            self.pref_txt_soporte.value = ""
+            self._mostrar_mensaje_exito("Reporte enviado correctamente", "Soporte")
+            self.page.update()
+        else:
+            self._mostrar_error(f"No se pudo enviar: {envio.get('error', 'error desconocido')}", "Soporte")
     
     def _construir_vista_configuracion(self) -> None:
         """Construye la vista de configuración de conexión."""
@@ -1478,6 +1562,105 @@ class AppEmisora:
             padding=ft.Padding.all(15),
             margin=ft.Padding.only(left=20, right=20, top=15, bottom=20),
         )
+
+        licencia = read_license_status()
+        panel_version_licencia = Container(
+            content=Column([
+                Text("Producto y Licencia", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                Container(height=6),
+                Text(f"Versión: {get_app_version()}", size=12, color=COLOR_TEXTO_SEC),
+                Text(f"Servidor licencias: {licencia.get('server_url', 'N/D')}", size=12, color=COLOR_TEXTO_SEC),
+                Text(f"Última razón: {licencia.get('last_reason', 'N/D')}", size=12, color=COLOR_TEXTO_SEC),
+                Container(height=10),
+                Button(
+                    content=Row([
+                        Icon(icons.VERIFIED_USER, color=colors.WHITE, size=16),
+                        Text("Verificar licencia", color=colors.WHITE, size=12),
+                    ], spacing=8),
+                    bgcolor=COLOR_PRIMARIO,
+                    on_click=self._verificar_licencia_manual,
+                ),
+            ]),
+            bgcolor=COLOR_TARJETA,
+            border=ft.Border.all(1, COLOR_BORDE),
+            border_radius=ft.BorderRadius.all(12),
+            padding=ft.Padding.all(15),
+            margin=ft.Padding.only(left=20, right=20, top=10),
+        )
+
+        self.pref_switch_notificaciones = ft.Switch(
+            label="Notificaciones activas",
+            value=bool(self._prefs.get("ui", {}).get("mostrar_notificaciones", True)),
+            on_change=self._guardar_preferencias_locales,
+        )
+        self.pref_switch_animaciones = ft.Switch(
+            label="Animaciones de interfaz",
+            value=bool(self._prefs.get("ui", {}).get("animaciones", True)),
+            on_change=self._guardar_preferencias_locales,
+        )
+        self.pref_switch_diagnostico = ft.Switch(
+            label="Diagnóstico rápido",
+            value=bool(self._prefs.get("features", {}).get("diagnostico_rapido", True)),
+            on_change=self._guardar_preferencias_locales,
+        )
+
+        panel_preferencias = Container(
+            content=Column([
+                Text("Preferencias de Kubito", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                Container(height=6),
+                self.pref_switch_notificaciones,
+                self.pref_switch_animaciones,
+                self.pref_switch_diagnostico,
+            ]),
+            bgcolor=COLOR_TARJETA,
+            border=ft.Border.all(1, COLOR_BORDE),
+            border_radius=ft.BorderRadius.all(12),
+            padding=ft.Padding.all(15),
+            margin=ft.Padding.only(left=20, right=20, top=10),
+        )
+
+        self.pref_txt_contacto = TextField(
+            label="Contacto (email o teléfono)",
+            value=str(self._prefs.get("support", {}).get("email", "")),
+            border_radius=12,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            on_blur=self._guardar_preferencias_locales,
+        )
+        self.pref_txt_soporte = TextField(
+            label="Sugerencia o reporte",
+            hint_text="Describe mejora, problema o solicitud",
+            multiline=True,
+            min_lines=3,
+            max_lines=5,
+            border_radius=12,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+
+        panel_soporte = Container(
+            content=Column([
+                Text("Soporte y sugerencias", size=14, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                Container(height=8),
+                self.pref_txt_contacto,
+                Container(height=8),
+                self.pref_txt_soporte,
+                Container(height=10),
+                Button(
+                    content=Row([
+                        Icon(icons.SEND_ROUNDED, color=colors.WHITE, size=16),
+                        Text("Enviar reporte", color=colors.WHITE, size=12),
+                    ], spacing=8),
+                    bgcolor=COLOR_INFO,
+                    on_click=self._enviar_reporte_soporte,
+                ),
+            ]),
+            bgcolor=COLOR_TARJETA,
+            border=ft.Border.all(1, COLOR_BORDE),
+            border_radius=ft.BorderRadius.all(12),
+            padding=ft.Padding.all(15),
+            margin=ft.Padding.only(left=20, right=20, top=10, bottom=20),
+        )
         
         # Construir vista
         contenedor = Column([
@@ -1486,6 +1669,9 @@ class AppEmisora:
             panel_campos,
             panel_botones,
             panel_info,
+            panel_version_licencia,
+            panel_preferencias,
+            panel_soporte,
         ], spacing=0, expand=True, scroll=ft.ScrollMode.AUTO)
         
         self.page.add(contenedor)
@@ -3325,16 +3511,6 @@ def _verificar_configuracion_inicial():
 
 def main(page: Page):
     """Punto de entrada de la aplicación."""
-    # Verificar configuración al inicio
-    try:
-        _verificar_configuracion_inicial()
-    except Exception as e:
-        print(f"[ERROR] Error en verificación inicial: {e}")
-    
-    AppEmisora(page)
-
-
-if __name__ == "__main__":
     def _obtener_version_app() -> str:
         try:
             version_path = PROJECT_ROOT / "version.txt"
@@ -3342,15 +3518,118 @@ if __name__ == "__main__":
         except Exception:
             return "0.0.0"
 
-    if validar_licencia_inicio is not None:
+    def _mostrar_bloqueo_en_pantalla(result) -> None:
+        page.clean()
+        page.add(
+            Container(
+                expand=True,
+                alignment=ft.Alignment(0, 0),
+                content=Column(
+                    horizontal_alignment=CrossAxisAlignment.CENTER,
+                    spacing=10,
+                    controls=[
+                        Icon(icons.LOCK_OUTLINE, size=56, color=COLOR_ERROR),
+                        Text("Kubito bloqueado por licencia", size=22, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text(result.message or "No se pudo validar licencia", color=COLOR_TEXTO_SEC, text_align=TextAlign.CENTER),
+                        Text(f"Código: {result.reason}", color=COLOR_TEXTO_SEC),
+                    ],
+                ),
+            )
+        )
+        page.update()
+
+    def _arrancar_app() -> None:
+        AppEmisora(page)
+
+    def _mostrar_modal_activacion() -> None:
+        key_input = TextField(
+            label="Key gratis de 7 días",
+            value=TRIAL_LICENSE_KEY,
+            hint_text="KUBO-TRIAL-7D-GRATIS",
+            password=False,
+            can_reveal_password=True,
+            width=420,
+        )
+        estado = Text(f"La key gratis ya está lista: {TRIAL_LICENSE_KEY}", size=12, color=COLOR_TEXTO_SEC)
+
+        def activar(_):
+            key = (key_input.value or "").strip()
+            if not key:
+                estado.value = "Debes ingresar una key válida."
+                estado.color = COLOR_ERROR
+                page.update()
+                return
+
+            if guardar_activation_key is not None:
+                guardar_activation_key(key)
+
+            nuevo_resultado = validar_licencia_inicio("emisora", _obtener_version_app())
+            if nuevo_resultado.allowed:
+                dlg.open = False
+                page.update()
+                print(f"[LICENCIA] {nuevo_resultado.message}")
+                return
+
+            estado.value = nuevo_resultado.message or "No se pudo activar la licencia."
+            estado.color = COLOR_ERROR
+            page.update()
+
+        async def salir(_):
+            await page.window.close()
+
+        dlg = AlertDialog(
+            modal=True,
+            title=Text("Activar Kubito", weight=FontWeight.BOLD),
+            content=Column(
+                tight=True,
+                spacing=10,
+                controls=[
+                    Text("Este equipo aún no está activado."),
+                    key_input,
+                    estado,
+                ],
+            ),
+            actions=[
+                ft.TextButton("Salir", on_click=salir),
+                ft.FilledButton("Activar", on_click=activar),
+            ],
+            actions_alignment=MainAxisAlignment.END,
+        )
+        page.show_dialog(dlg)
+
+    def _validar_licencia_inicial() -> Any:
+        if validar_licencia_inicio is None:
+            return None
+
         resultado = validar_licencia_inicio("emisora", _obtener_version_app())
-        if not resultado.allowed:
+        if resultado.allowed:
+            print(f"[LICENCIA] {resultado.message}")
+        elif resultado.reason != "activation_required":
+            if resultado.reason == "product_mismatch" and limpiar_activation_key is not None:
+                limpiar_activation_key()
+                _mostrar_modal_activacion()
+                return resultado
             if mostrar_banner_bloqueo is not None:
                 mostrar_banner_bloqueo("emisora", resultado)
             print(f"[LICENCIA] Acceso denegado: {resultado.message}")
-            raise SystemExit(1)
-        print(f"[LICENCIA] {resultado.message}")
+            _mostrar_bloqueo_en_pantalla(resultado)
+        return resultado
 
+    # Verificar configuración al inicio
+    try:
+        _verificar_configuracion_inicial()
+    except Exception as e:
+        print(f"[ERROR] Error en verificación inicial: {e}")
+
+    _arrancar_app()
+
+    resultado_licencia = _validar_licencia_inicial()
+    if resultado_licencia is not None and not resultado_licencia.allowed:
+        if resultado_licencia.reason == "activation_required":
+            _mostrar_modal_activacion()
+
+
+if __name__ == "__main__":
     # asegurarse de que el directorio de iconos esté en assets
     assets = str(PROJECT_ROOT)
     ft.run(main, assets_dir=assets)

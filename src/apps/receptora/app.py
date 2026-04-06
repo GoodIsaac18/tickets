@@ -67,16 +67,47 @@ except ImportError:
 
 # Validación remota de licencia/control de instalación
 try:
-    from licencias_cliente import validar_licencia_inicio, mostrar_banner_bloqueo
+    from licencias_cliente import validar_licencia_inicio, mostrar_banner_bloqueo, guardar_activation_key, limpiar_activation_key, TRIAL_LICENSE_KEY
 except Exception:
     validar_licencia_inicio = None
     mostrar_banner_bloqueo = None
+    guardar_activation_key = None
+    limpiar_activation_key = None
+    TRIAL_LICENSE_KEY = "KUBO-TRIAL-7D-GRATIS"
 
 # Validación centralizada
 try:
     from src.core.validators import InputValidator
 except Exception:
     InputValidator = None
+
+try:
+    from src.core.app_preferences import (
+        get_app_version,
+        load_app_preferences,
+        save_app_preferences,
+        read_license_status,
+        verify_license_now,
+        send_support_report,
+    )
+except Exception:
+    def get_app_version() -> str:
+        return "0.0.0"
+
+    def load_app_preferences(app_id: str) -> Dict[str, Any]:
+        return {"ui": {}, "features": {}, "support": {}}
+
+    def save_app_preferences(app_id: str, prefs: Dict[str, Any]) -> Dict[str, Any]:
+        return prefs
+
+    def read_license_status() -> Dict[str, Any]:
+        return {}
+
+    def verify_license_now(app_id: str) -> Dict[str, Any]:
+        return {"ok": False, "message": "Módulo no disponible"}
+
+    def send_support_report(app_id: str, report_type: str, message: str, contact: str = "", extra: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        return {"ok": False, "error": "Módulo no disponible"}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -259,6 +290,12 @@ class PanelAdminIT:
         self._perf_vistas: Dict[str, List[float]] = {}
         self._perf_umbral_lento_ms = float(os.getenv("TICKETS_UI_SLOW_MS", "350"))
         self._perf_log_detallado = os.getenv("TICKETS_UI_PERF_VERBOSE", "0") == "1"
+        self._prefs = load_app_preferences("kubo")
+        self._cfg_txt_contacto = None
+        self._cfg_txt_mensaje = None
+        self._cfg_sw_notificaciones = None
+        self._cfg_sw_animaciones = None
+        self._cfg_sw_diagnostico = None
         
         self._configurar_pagina()
         self._construir_ui()
@@ -286,9 +323,26 @@ class PanelAdminIT:
         """Construye la interfaz de usuario principal."""
         # Header superior
         self.header = self._construir_header()
+        nav_height = max(420, int(getattr(self.page.window, "height", 900)) - 130)
         
         # Panel de navegación lateral
         self.nav_rail = self._construir_navegacion()
+        nav_lateral_scroll = Container(
+            width=120,
+            height=nav_height,
+            bgcolor=COLOR_SUPERFICIE,
+            content=ListView(
+                controls=[
+                    Container(
+                        height=nav_height,
+                        content=self.nav_rail,
+                    )
+                ],
+                spacing=0,
+                expand=True,
+                padding=0,
+            ),
+        )
         
         # Área de contenido principal
         self.contenido = Container(
@@ -312,7 +366,7 @@ class PanelAdminIT:
                 self.header,
                 Row(
                     controls=[
-                        self.nav_rail,
+                        nav_lateral_scroll,
                         Container(width=1, bgcolor=COLOR_SUPERFICIE_2),
                         self.contenido,
                         self.panel_detalle
@@ -392,8 +446,8 @@ class PanelAdminIT:
         return NavigationRail(
             selected_index=0,
             label_type=ft.NavigationRailLabelType.ALL,
-            min_width=100,
-            min_extended_width=200,
+            min_width=76,
+            min_extended_width=160,
             bgcolor=COLOR_SUPERFICIE,
             indicator_color=COLOR_PRIMARIO,
             destinations=[
@@ -447,6 +501,11 @@ class PanelAdminIT:
                     selected_icon=icons.MANAGE_SEARCH,
                     label="Búsqueda"
                 ),
+                NavigationRailDestination(
+                    icon=icons.SETTINGS_OUTLINED,
+                    selected_icon=icons.SETTINGS,
+                    label="Configuración"
+                ),
             ],
             on_change=self._cambiar_vista
         )
@@ -475,6 +534,7 @@ class PanelAdminIT:
             self._vista_escaner_red,
             self._vista_solicitudes,
             self._vista_busqueda_global,
+            self._vista_configuracion_app,
         ]
 
     def _obtener_vista(self, indice: int, forzar: bool = False):
@@ -525,8 +585,139 @@ class PanelAdminIT:
             "Red/Escaneo",
             "Solicitudes",
             "Búsqueda",
+            "Configuración",
         ]
         return nombres[indice] if 0 <= indice < len(nombres) else f"Vista {indice}"
+
+    def _guardar_preferencias_locales(self, e=None):
+        self._prefs.setdefault("ui", {})
+        self._prefs.setdefault("features", {})
+        self._prefs.setdefault("support", {})
+        self._prefs["ui"]["mostrar_notificaciones"] = bool(self._cfg_sw_notificaciones.value) if self._cfg_sw_notificaciones else True
+        self._prefs["ui"]["animaciones"] = bool(self._cfg_sw_animaciones.value) if self._cfg_sw_animaciones else True
+        self._prefs["features"]["diagnostico_rapido"] = bool(self._cfg_sw_diagnostico.value) if self._cfg_sw_diagnostico else True
+        if self._cfg_txt_contacto:
+            self._prefs["support"]["email"] = self._cfg_txt_contacto.value.strip()
+        save_app_preferences("kubo", self._prefs)
+        self._mostrar_snackbar("✓ Preferencias guardadas", COLOR_EXITO)
+
+    def _verificar_licencia_desde_config(self, e=None):
+        resultado = verify_license_now("receptora")
+        if resultado.get("ok"):
+            self._mostrar_exito(resultado.get("message", "Licencia válida"), "Verificación de licencia")
+        else:
+            self._mostrar_error(resultado.get("message", "No se pudo verificar licencia"), "Verificación de licencia")
+
+    def _enviar_reporte_soporte(self, e=None):
+        if not self._cfg_txt_mensaje or not self._cfg_txt_mensaje.value.strip():
+            self._mostrar_advertencia("Escribe un mensaje antes de enviarlo", "Soporte")
+            return
+
+        contacto = self._cfg_txt_contacto.value.strip() if self._cfg_txt_contacto else ""
+        mensaje = self._cfg_txt_mensaje.value.strip()
+        envio = send_support_report(
+            app_id="kubo",
+            report_type="sugerencia",
+            message=mensaje,
+            contact=contacto,
+            extra={"servidor": self.servidor_ip or "", "puerto": self.servidor_puerto or ""},
+        )
+
+        if envio.get("ok"):
+            self._cfg_txt_mensaje.value = ""
+            self._mostrar_exito("Reporte enviado correctamente", "Soporte")
+            self.page.update()
+        else:
+            self._mostrar_error(f"No se pudo enviar: {envio.get('error', 'error desconocido')}", "Soporte")
+
+    def _vista_configuracion_app(self) -> Column:
+        licencia = read_license_status()
+
+        self._cfg_sw_notificaciones = Switch(
+            label="Notificaciones activas",
+            value=bool(self._prefs.get("ui", {}).get("mostrar_notificaciones", True)),
+            on_change=self._guardar_preferencias_locales,
+        )
+        self._cfg_sw_animaciones = Switch(
+            label="Animaciones de interfaz",
+            value=bool(self._prefs.get("ui", {}).get("animaciones", True)),
+            on_change=self._guardar_preferencias_locales,
+        )
+        self._cfg_sw_diagnostico = Switch(
+            label="Diagnóstico rápido",
+            value=bool(self._prefs.get("features", {}).get("diagnostico_rapido", True)),
+            on_change=self._guardar_preferencias_locales,
+        )
+        self._cfg_txt_contacto = TextField(
+            label="Contacto de soporte",
+            value=str(self._prefs.get("support", {}).get("email", "")),
+            hint_text="correo@empresa.com",
+            on_blur=self._guardar_preferencias_locales,
+        )
+        self._cfg_txt_mensaje = TextField(
+            label="Sugerencia o reporte",
+            multiline=True,
+            min_lines=3,
+            max_lines=5,
+            hint_text="Describe mejora, problema o solicitud",
+        )
+
+        return Column(
+            controls=[
+                Container(
+                    content=Text("⚙️ Configuración, Licencia y Soporte", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    padding=ft.Padding.only(bottom=15),
+                ),
+                Container(
+                    content=Column([
+                        Text("Producto", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text(f"Versión: {get_app_version()}", size=12, color=COLOR_TEXTO_SEC),
+                        Text(f"Servidor licencias: {licencia.get('server_url', 'N/D')}", size=12, color=COLOR_TEXTO_SEC),
+                        Text(f"Última razón: {licencia.get('last_reason', 'N/D')}", size=12, color=COLOR_TEXTO_SEC),
+                        Container(height=8),
+                        ft.ElevatedButton(
+                            "Verificar licencia ahora",
+                            icon=icons.VERIFIED_USER,
+                            on_click=self._verificar_licencia_desde_config,
+                        ),
+                    ], spacing=6),
+                    bgcolor=COLOR_SUPERFICIE,
+                    border_radius=12,
+                    padding=16,
+                ),
+                Container(height=12),
+                Container(
+                    content=Column([
+                        Text("Preferencias", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        self._cfg_sw_notificaciones,
+                        self._cfg_sw_animaciones,
+                        self._cfg_sw_diagnostico,
+                    ], spacing=6),
+                    bgcolor=COLOR_SUPERFICIE,
+                    border_radius=12,
+                    padding=16,
+                ),
+                Container(height=12),
+                Container(
+                    content=Column([
+                        Text("Soporte y sugerencias", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        self._cfg_txt_contacto,
+                        self._cfg_txt_mensaje,
+                        ft.ElevatedButton(
+                            "Enviar reporte",
+                            icon=icons.SEND,
+                            on_click=self._enviar_reporte_soporte,
+                        ),
+                    ], spacing=8),
+                    bgcolor=COLOR_SUPERFICIE,
+                    border_radius=12,
+                    padding=16,
+                ),
+                Container(height=20),
+            ],
+            scroll=ScrollMode.AUTO,
+            expand=True,
+        )
 
     def _registrar_tiempo_vista(self, indice: int, duracion_ms: float, cache_hit: bool) -> None:
         nombre = self._nombre_vista(indice)
@@ -8393,19 +8584,6 @@ def _inicializar_base_datos_automatica():
 
 def main(page: Page):
     """Función principal que inicializa la aplicación."""
-    # Inicializar base de datos automáticamente al inicio
-    try:
-        _inicializar_base_datos_automatica()
-    except Exception as e:
-        print(f"[ERROR] Error en inicialización automática: {e}")
-    
-    # Crear el panel principal
-    PanelAdminIT(page)
-
-
-if __name__ == "__main__":
-    import asyncio
-
     def _obtener_version_app() -> str:
         try:
             version_path = PROJECT_ROOT / "version.txt"
@@ -8413,14 +8591,120 @@ if __name__ == "__main__":
         except Exception:
             return "0.0.0"
 
-    if validar_licencia_inicio is not None:
+    def _mostrar_bloqueo_en_pantalla(result) -> None:
+        page.clean()
+        page.add(
+            Container(
+                expand=True,
+                alignment=ft.Alignment(0, 0),
+                content=Column(
+                    horizontal_alignment=CrossAxisAlignment.CENTER,
+                    spacing=12,
+                    controls=[
+                        Icon(icons.LOCK_OUTLINE, size=64, color=COLOR_ERROR),
+                        Text("Acceso bloqueado por licenciamiento", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                        Text(result.message or "No se pudo validar la licencia", color=COLOR_TEXTO_SEC, text_align=TextAlign.CENTER),
+                        Text(f"Código: {result.reason}", color=COLOR_TEXTO_SEC),
+                    ],
+                ),
+            )
+        )
+        page.update()
+
+    def _arrancar_app() -> None:
+        PanelAdminIT(page)
+
+    def _mostrar_modal_activacion() -> None:
+        key_input = TextField(
+            label="Key gratis de 7 días",
+            value=TRIAL_LICENSE_KEY,
+            hint_text="KUBO-TRIAL-7D-GRATIS",
+            password=False,
+            can_reveal_password=True,
+            width=420,
+        )
+        estado = Text(f"La key gratis ya está lista: {TRIAL_LICENSE_KEY}", size=12, color=COLOR_TEXTO_SEC)
+
+        def activar(_):
+            key = (key_input.value or "").strip()
+            if not key:
+                estado.value = "Debes ingresar una key válida."
+                estado.color = COLOR_ERROR
+                page.update()
+                return
+
+            if guardar_activation_key is not None:
+                guardar_activation_key(key)
+
+            nuevo_resultado = validar_licencia_inicio("receptora", _obtener_version_app())
+            if nuevo_resultado.allowed:
+                dlg.open = False
+                page.update()
+                print(f"[LICENCIA] {nuevo_resultado.message}")
+                return
+
+            estado.value = nuevo_resultado.message or "No se pudo activar la licencia."
+            estado.color = COLOR_ERROR
+            page.update()
+
+        async def salir(_):
+            await page.window.close()
+
+        dlg = AlertDialog(
+            modal=True,
+            title=Text("Activar Kubo", weight=FontWeight.BOLD),
+            content=Column(
+                tight=True,
+                spacing=10,
+                controls=[
+                    Text("Este equipo aún no está activado."),
+                    key_input,
+                    estado,
+                ],
+            ),
+            actions=[
+                ft.TextButton("Salir", on_click=salir),
+                ft.FilledButton("Activar", on_click=activar),
+            ],
+            actions_alignment=MainAxisAlignment.END,
+        )
+        page.show_dialog(dlg)
+
+    def _validar_licencia_inicial() -> Any:
+        if validar_licencia_inicio is None:
+            return None
+
         resultado = validar_licencia_inicio("receptora", _obtener_version_app())
-        if not resultado.allowed:
+        if resultado.allowed:
+            print(f"[LICENCIA] {resultado.message}")
+        elif resultado.reason != "activation_required":
+            if resultado.reason == "product_mismatch" and limpiar_activation_key is not None:
+                limpiar_activation_key()
+                _mostrar_modal_activacion()
+                return resultado
             if mostrar_banner_bloqueo is not None:
                 mostrar_banner_bloqueo("receptora", resultado)
             print(f"[LICENCIA] Acceso denegado: {resultado.message}")
-            raise SystemExit(1)
-        print(f"[LICENCIA] {resultado.message}")
+            _mostrar_bloqueo_en_pantalla(resultado)
+        return resultado
+
+    # Inicializar base de datos automáticamente al inicio
+    try:
+        _inicializar_base_datos_automatica()
+    except Exception as e:
+        print(f"[ERROR] Error en inicialización automática: {e}")
+
+    # Construir UI primero para que el modal no cierre la ventana de arranque.
+    _arrancar_app()
+
+    resultado_licencia = _validar_licencia_inicial()
+    if resultado_licencia is not None and not resultado_licencia.allowed:
+        if resultado_licencia.reason == "activation_required":
+            _mostrar_modal_activacion()
+
+
+if __name__ == "__main__":
+    import asyncio
 
     def _suprimir_errores_conexion(loop, context):
         """
