@@ -11,6 +11,8 @@ import sqlite3
 import pandas as pd
 import os
 import uuid
+import json
+import hashlib
 import socket
 import subprocess
 import re
@@ -71,12 +73,8 @@ PRIORIDADES       = ["Crítica", "Alta", "Media", "Baja"]
 MAX_REINTENTOS    = 3
 TIEMPO_ESPERA_REINTENTO = 2
 
-TECNICOS_EQUIPO = [
-    {"id": "TEC001", "nombre": "Carlos Rodríguez", "especialidad": "Hardware/Red",
-     "telefono": "ext. 101", "email": "carlos.rodriguez@empresa.com"},
-    {"id": "TEC002", "nombre": "María García",     "especialidad": "Software/Accesos",
-     "telefono": "ext. 102", "email": "maria.garcia@empresa.com"}
-]
+# Sin técnicos seed por defecto: la carga es manual desde la aplicación.
+TECNICOS_EQUIPO = []
 
 # Locks de escritura (WAL mode permite lecturas concurrentes)
 _lock_escritura   = threading.RLock()
@@ -234,14 +232,33 @@ CREATE TABLE IF NOT EXISTS ticket_log (
     FECHA       TEXT NOT NULL,
     USUARIO_OP  TEXT DEFAULT 'Sistema',
     ACCION      TEXT NOT NULL,
-    DETALLE     TEXT DEFAULT ''
+    DETALLE     TEXT DEFAULT '',
+    ORIGEN      TEXT DEFAULT 'sistema',
+    ESTADO_ANTES TEXT DEFAULT '',
+    ESTADO_DESPUES TEXT DEFAULT '',
+    META_JSON   TEXT DEFAULT '',
+    HASH_PREV   TEXT DEFAULT '',
+    HASH_EVENT  TEXT DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_log_ticket ON ticket_log(ID_TICKET);
+CREATE INDEX IF NOT EXISTS idx_log_fecha ON ticket_log(FECHA);
+"""
+
+_DDL_TICKET_CHAT = """
+CREATE TABLE IF NOT EXISTS ticket_chat (
+    ID           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ID_TICKET    TEXT NOT NULL,
+    FECHA        TEXT NOT NULL,
+    AUTOR_TIPO   TEXT NOT NULL DEFAULT 'usuario',
+    AUTOR_ID     TEXT NOT NULL,
+    MENSAJE      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_ticket_fecha ON ticket_chat(ID_TICKET, FECHA);
 """
 
 
 def _crear_tablas(conn: sqlite3.Connection):
-    for ddl in [_DDL_TICKETS, _DDL_TECNICOS, _DDL_EQUIPOS, _DDL_RED, _DDL_COUNTERS, _DDL_TICKET_LOG]:
+    for ddl in [_DDL_TICKETS, _DDL_TECNICOS, _DDL_EQUIPOS, _DDL_RED, _DDL_COUNTERS, _DDL_TICKET_LOG, _DDL_TICKET_CHAT]:
         conn.executescript(ddl)
 
 
@@ -267,6 +284,8 @@ class GestorTickets:
         # Conexión principal (usada en hilos de la receptora)
         self._conn = _conectar(self.db_path)
         _crear_tablas(self._conn)
+        self._asegurar_schema_ticket_log()
+        self._asegurar_inmutabilidad_ticket_log()
         self._inicializar_tecnicos()
         print(f"[SQLite] Base de datos lista: {self.db_path}")
 
@@ -300,13 +319,93 @@ class GestorTickets:
         cur = conn.execute(sql, params)
         return cur.fetchone()
 
+    def _asegurar_schema_ticket_log(self):
+        """Asegura columnas nuevas del log sin romper instalaciones existentes."""
+        try:
+            cols = self._consultar("PRAGMA table_info(ticket_log)")
+            existentes = {c["name"] for c in cols}
+            faltantes = {
+                "ORIGEN": "TEXT DEFAULT 'sistema'",
+                "ESTADO_ANTES": "TEXT DEFAULT ''",
+                "ESTADO_DESPUES": "TEXT DEFAULT ''",
+                "META_JSON": "TEXT DEFAULT ''",
+                "HASH_PREV": "TEXT DEFAULT ''",
+                "HASH_EVENT": "TEXT DEFAULT ''",
+            }
+            for col, ddl in faltantes.items():
+                if col not in existentes:
+                    self._ejecutar(f"ALTER TABLE ticket_log ADD COLUMN {col} {ddl}")
+        except Exception as ex:
+            print(f"[SQLite] Aviso migracion ticket_log: {ex}")
+
+    def _asegurar_inmutabilidad_ticket_log(self):
+        """Bloquea UPDATE/DELETE sobre ticket_log para preservar trazabilidad."""
+        try:
+            conn = self._c()
+            conn.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS trg_ticket_log_no_update
+                BEFORE UPDATE ON ticket_log
+                BEGIN
+                    SELECT RAISE(ABORT, 'ticket_log es inmutable: UPDATE no permitido');
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS trg_ticket_log_no_delete
+                BEFORE DELETE ON ticket_log
+                BEGIN
+                    SELECT RAISE(ABORT, 'ticket_log es inmutable: DELETE no permitido');
+                END;
+                """
+            )
+        except Exception as ex:
+            print(f"[SQLite] Aviso inmutabilidad ticket_log: {ex}")
+
+    @staticmethod
+    def _calcular_hash_log(hash_prev: str, payload: Dict[str, Any]) -> str:
+        """Calcula hash SHA-256 determinístico para cadena de auditoría."""
+        data = {
+            "hash_prev": hash_prev or "GENESIS",
+            "payload": payload,
+        }
+        serial = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serial.encode("utf-8")).hexdigest()
+
+    def _ultimo_hash_ticket(self, id_ticket: str) -> str:
+        """Retorna el hash más reciente del ticket para encadenar eventos."""
+        row = self._consultar_uno(
+            "SELECT HASH_EVENT, HASH_PREV, FECHA, USUARIO_OP, ACCION, DETALLE, ORIGEN, ESTADO_ANTES, ESTADO_DESPUES, META_JSON "
+            "FROM ticket_log WHERE ID_TICKET=? ORDER BY ID DESC LIMIT 1",
+            (id_ticket,)
+        )
+        if not row:
+            return "GENESIS"
+
+        hash_event = (row["HASH_EVENT"] or "").strip()
+        if hash_event:
+            return hash_event
+
+        # Compatibilidad con eventos legacy sin hash: reconstruir al vuelo.
+        payload = {
+            "id_ticket": id_ticket,
+            "fecha": row["FECHA"] or "",
+            "usuario_op": row["USUARIO_OP"] or "Sistema",
+            "accion": row["ACCION"] or "",
+            "detalle": row["DETALLE"] or "",
+            "origen": row["ORIGEN"] or "sistema",
+            "estado_antes": row["ESTADO_ANTES"] or "",
+            "estado_despues": row["ESTADO_DESPUES"] or "",
+            "meta_json": row["META_JSON"] or "",
+        }
+        prev = (row["HASH_PREV"] or "").strip() or "GENESIS"
+        return self._calcular_hash_log(prev, payload)
+
     # ------------------------------------------------------------------
     # Inicialización
     # ------------------------------------------------------------------
 
     def _inicializar_tecnicos(self):
         existe = self._consultar_uno("SELECT COUNT(*) as c FROM tecnicos")
-        if existe and existe["c"] == 0:
+        if existe and existe["c"] == 0 and TECNICOS_EQUIPO:
             for tec in TECNICOS_EQUIPO:
                 self._ejecutar(
                     """INSERT OR IGNORE INTO tecnicos
@@ -445,10 +544,17 @@ class GestorTickets:
         )
         return _rows_to_df(rows, COLUMNAS_TECNICOS)
 
-    def asignar_ticket_a_tecnico(self, id_ticket: str, id_tecnico: str) -> bool:
+    def asignar_ticket_a_tecnico(self, id_ticket: str, id_tecnico: str,
+                                 usuario_op: str = "Sistema",
+                                 origen: str = "kubo") -> bool:
         tec = self.obtener_tecnico_por_id(id_tecnico)
         if not tec:
             return False
+        ticket = self.obtener_ticket_por_id(id_ticket)
+        if not ticket:
+            return False
+
+        estado_antes = str(ticket.get("ESTADO", ""))
         nombre = tec.get("NOMBRE", "")
         with _lock_escritura:
             conn = self._c()
@@ -461,6 +567,19 @@ class GestorTickets:
                    ULTIMA_ACTIVIDAD=? WHERE ID_TECNICO=?""",
                 (id_ticket, _dt_str(datetime.now()), id_tecnico)
             )
+        try:
+            self.registrar_log_ticket(
+                id_ticket,
+                "Asignación",
+                f"Asignado a {nombre} ({id_tecnico})",
+                usuario_op=usuario_op,
+                origen=origen,
+                estado_antes=estado_antes,
+                estado_despues="En Proceso",
+                meta={"id_tecnico": id_tecnico, "tecnico": nombre},
+            )
+        except Exception:
+            pass
         return True
 
     def liberar_tecnico(self, id_tecnico: str) -> bool:
@@ -530,7 +649,12 @@ class GestorTickets:
         try:
             self.registrar_log_ticket(
                 id_ticket, "Ticket creado",
-                f"Categoría: {categoria} | Prioridad: {prioridad} | Usuario: {usuario_ad} | Estado: {estado}"
+                f"Categoría: {categoria} | Prioridad: {prioridad} | Usuario: {usuario_ad} | Estado: {estado}",
+                usuario_op=usuario_ad or "Usuario",
+                origen="app_emisora",
+                estado_antes="",
+                estado_despues=estado,
+                meta={"categoria": categoria, "prioridad": prioridad, "hostname": hostname}
             )
         except Exception:
             pass
@@ -541,13 +665,51 @@ class GestorTickets:
     # ------------------------------------------------------------------
 
     def registrar_log_ticket(self, id_ticket: str, accion: str,
-                              detalle: str = "", usuario_op: str = "Sistema") -> bool:
+                              detalle: str = "", usuario_op: str = "Sistema",
+                              origen: str = "sistema",
+                              estado_antes: str = "",
+                              estado_despues: str = "",
+                              meta: Optional[Dict[str, Any]] = None) -> bool:
         """Registra una entrada en el log de cambios de un ticket."""
         try:
+            meta_json = ""
+            if meta:
+                try:
+                    meta_json = json.dumps(meta, ensure_ascii=False)
+                except Exception:
+                    meta_json = str(meta)
+
+            hash_prev = self._ultimo_hash_ticket(id_ticket)
+            payload = {
+                "id_ticket": id_ticket,
+                "fecha": _dt_str(datetime.now()),
+                "usuario_op": usuario_op,
+                "accion": accion,
+                "detalle": detalle,
+                "origen": origen,
+                "estado_antes": estado_antes or "",
+                "estado_despues": estado_despues or "",
+                "meta_json": meta_json,
+            }
+            hash_event = self._calcular_hash_log(hash_prev, payload)
+
             self._ejecutar(
-                """INSERT INTO ticket_log (ID_TICKET, FECHA, USUARIO_OP, ACCION, DETALLE)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (id_ticket, _dt_str(datetime.now()), usuario_op, accion, detalle)
+                """INSERT INTO ticket_log
+                   (ID_TICKET, FECHA, USUARIO_OP, ACCION, DETALLE, ORIGEN, ESTADO_ANTES, ESTADO_DESPUES, META_JSON, HASH_PREV, HASH_EVENT)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    id_ticket,
+                    payload["fecha"],
+                    usuario_op,
+                    accion,
+                    detalle,
+                    origen,
+                    estado_antes or "",
+                    estado_despues or "",
+                    meta_json,
+                    hash_prev,
+                    hash_event,
+                )
             )
             return True
         except Exception as ex:
@@ -561,6 +723,61 @@ class GestorTickets:
             (id_ticket,)
         )
         return [_row_to_dict(r) for r in rows]
+
+    def verificar_integridad_log_ticket(self, id_ticket: str) -> Dict[str, Any]:
+        """Verifica cadena hash del log de un ticket y reporta inconsistencias."""
+        rows = self._consultar(
+            "SELECT * FROM ticket_log WHERE ID_TICKET=? ORDER BY ID ASC",
+            (id_ticket,)
+        )
+        if not rows:
+            return {"ok": True, "total": 0, "verificados": 0, "legacy": 0, "errores": []}
+
+        prev = "GENESIS"
+        errores: List[Dict[str, Any]] = []
+        verificados = 0
+        legacy = 0
+
+        for r in rows:
+            row = _row_to_dict(r)
+            payload = {
+                "id_ticket": row.get("ID_TICKET", ""),
+                "fecha": row.get("FECHA", "") or "",
+                "usuario_op": row.get("USUARIO_OP", "Sistema") or "Sistema",
+                "accion": row.get("ACCION", "") or "",
+                "detalle": row.get("DETALLE", "") or "",
+                "origen": row.get("ORIGEN", "sistema") or "sistema",
+                "estado_antes": row.get("ESTADO_ANTES", "") or "",
+                "estado_despues": row.get("ESTADO_DESPUES", "") or "",
+                "meta_json": row.get("META_JSON", "") or "",
+            }
+            esperado = self._calcular_hash_log(prev, payload)
+
+            hash_prev_db = (row.get("HASH_PREV") or "").strip()
+            hash_event_db = (row.get("HASH_EVENT") or "").strip()
+
+            if not hash_event_db:
+                legacy += 1
+                prev = esperado
+                continue
+
+            if hash_prev_db and hash_prev_db != prev:
+                errores.append({"id": row.get("ID"), "tipo": "hash_prev_mismatch"})
+
+            if hash_event_db != esperado:
+                errores.append({"id": row.get("ID"), "tipo": "hash_event_mismatch"})
+            else:
+                verificados += 1
+
+            prev = hash_event_db
+
+        return {
+            "ok": len(errores) == 0,
+            "total": len(rows),
+            "verificados": verificados,
+            "legacy": legacy,
+            "errores": errores,
+        }
 
     # ------------------------------------------------------------------
     # STATS REALES PARA DASHBOARD
@@ -856,17 +1073,146 @@ class GestorTickets:
             )
         return [_row_to_dict(r) for r in rows]
 
+    def agregar_mensaje_chat_ticket(self, id_ticket: str, autor_tipo: str,
+                                     autor_id: str, mensaje: str) -> Optional[Dict[str, Any]]:
+        """Agrega un mensaje al chat del ticket y retorna el mensaje insertado."""
+        ticket = self.obtener_ticket_por_id(id_ticket)
+        if not ticket:
+            return None
+
+        autor_tipo_n = (autor_tipo or "usuario").strip().lower()
+        if autor_tipo_n not in {"usuario", "tecnico", "sistema"}:
+            autor_tipo_n = "usuario"
+
+        autor_id_n = str(autor_id or "").strip() or "desconocido"
+        mensaje_n = str(mensaje or "").strip()
+        if not mensaje_n:
+            return None
+
+        fecha = _dt_str(datetime.now())
+        self._ejecutar(
+            """INSERT INTO ticket_chat (ID_TICKET, FECHA, AUTOR_TIPO, AUTOR_ID, MENSAJE)
+               VALUES (?, ?, ?, ?, ?)""",
+            (id_ticket, fecha, autor_tipo_n, autor_id_n, mensaje_n),
+        )
+        row = self._consultar_uno("SELECT last_insert_rowid() AS id")
+        msg_id = int(row["id"] if row else 0)
+        return {
+            "id": msg_id,
+            "id_ticket": id_ticket,
+            "fecha": fecha,
+            "autor_tipo": autor_tipo_n,
+            "autor_id": autor_id_n,
+            "mensaje": mensaje_n,
+        }
+
+    def obtener_chat_ticket(self, id_ticket: str, limite: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """Obtiene mensajes del chat de un ticket en orden cronológico."""
+        lim = max(1, min(int(limite), 500))
+        off = max(0, int(offset))
+        rows = self._consultar(
+            """SELECT ID, ID_TICKET, FECHA, AUTOR_TIPO, AUTOR_ID, MENSAJE
+               FROM ticket_chat
+               WHERE ID_TICKET = ?
+               ORDER BY ID ASC
+               LIMIT ? OFFSET ?""",
+            (id_ticket, lim, off),
+        )
+        return [
+            {
+                "id": int(r["ID"]),
+                "id_ticket": str(r["ID_TICKET"]),
+                "fecha": str(r["FECHA"]),
+                "autor_tipo": str(r["AUTOR_TIPO"]),
+                "autor_id": str(r["AUTOR_ID"]),
+                "mensaje": str(r["MENSAJE"]),
+            }
+            for r in rows
+        ]
+
+    def obtener_resumen_chats_tickets(self, limite: int = 300) -> List[Dict[str, Any]]:
+        """Retorna tickets con actividad de chat, priorizando los más recientes."""
+        lim = max(1, min(int(limite), 1000))
+        rows = self._consultar(
+            """
+            SELECT
+                t.ID_TICKET,
+                t.TURNO,
+                t.CATEGORIA,
+                t.USUARIO_AD,
+                t.ESTADO,
+                c.TOTAL_MENSAJES,
+                c.ULTIMA_FECHA
+            FROM tickets t
+            INNER JOIN (
+                SELECT ID_TICKET, COUNT(*) AS TOTAL_MENSAJES, MAX(FECHA) AS ULTIMA_FECHA
+                FROM ticket_chat
+                GROUP BY ID_TICKET
+            ) c ON c.ID_TICKET = t.ID_TICKET
+            ORDER BY c.ULTIMA_FECHA DESC
+            LIMIT ?
+            """,
+            (lim,),
+        )
+        return [
+            {
+                "id_ticket": str(r["ID_TICKET"]),
+                "turno": str(r["TURNO"]),
+                "categoria": str(r["CATEGORIA"]),
+                "usuario_ad": str(r["USUARIO_AD"]),
+                "estado": str(r["ESTADO"]),
+                "total_mensajes": int(r["TOTAL_MENSAJES"] or 0),
+                "ultima_fecha": str(r["ULTIMA_FECHA"] or ""),
+            }
+            for r in rows
+        ]
+
+    def contar_chats_pendientes_tecnico(self, limite: int = 500) -> int:
+        """Cuenta tickets activos cuyo último mensaje de chat es del usuario."""
+        lim = max(1, min(int(limite), 2000))
+        row = self._consultar_uno(
+            """
+            SELECT COUNT(*) AS C
+            FROM (
+                SELECT tc.ID_TICKET, tc.AUTOR_TIPO
+                FROM ticket_chat tc
+                INNER JOIN (
+                    SELECT ID_TICKET, MAX(ID) AS MAX_ID
+                    FROM ticket_chat
+                    GROUP BY ID_TICKET
+                ) ult ON ult.ID_TICKET = tc.ID_TICKET AND ult.MAX_ID = tc.ID
+                INNER JOIN tickets t ON t.ID_TICKET = tc.ID_TICKET
+                WHERE t.ESTADO NOT IN ('Cerrado', 'Cancelado')
+                ORDER BY tc.ID DESC
+                LIMIT ?
+            ) x
+            WHERE LOWER(COALESCE(x.AUTOR_TIPO, '')) = 'usuario'
+            """,
+            (lim,),
+        )
+        if not row:
+            return 0
+        try:
+            return int(row["C"] or 0)
+        except Exception:
+            return 0
+
     def actualizar_ticket(self, id_ticket: str,
                           estado: Optional[str] = None,
                           tecnico_asignado: Optional[str] = None,
                           notas_resolucion: Optional[str] = None,
                           historial: Optional[str] = None,
-                          fecha_cierre: Optional[datetime] = None) -> bool:
+                          fecha_cierre: Optional[datetime] = None,
+                          usuario_op: str = "Sistema",
+                          origen: str = "sistema") -> bool:
         doc = self.obtener_ticket_por_id(id_ticket)
         if not doc:
             return False
         if doc.get("ESTADO") in ["Cerrado", "Cancelado"]:
             raise ValueError("No se puede editar un ticket cerrado o cancelado.")
+
+        estado_anterior = str(doc.get("ESTADO", ""))
+        tecnico_anterior = str(doc.get("TECNICO_ASIGNADO", "") or "")
 
         sets, params = [], []
         if estado is not None:
@@ -894,14 +1240,40 @@ class GestorTickets:
         # Registrar en log automáticamente
         try:
             cambios_log = []
+            meta = {"campos": []}
             if estado is not None:
                 cambios_log.append(f"Estado → {estado}")
+                meta["campos"].append("ESTADO")
             if tecnico_asignado is not None:
                 cambios_log.append(f"Técnico → {tecnico_asignado}")
+                meta["campos"].append("TECNICO_ASIGNADO")
             if notas_resolucion is not None:
                 cambios_log.append("Notas de resolución actualizadas")
+                meta["campos"].append("NOTAS_RESOLUCION")
+            if historial is not None:
+                cambios_log.append("Historial actualizado")
+                meta["campos"].append("HISTORIAL")
+            if fecha_cierre is not None:
+                cambios_log.append("Fecha de cierre actualizada")
+                meta["campos"].append("FECHA_CIERRE")
+
+            estado_final = estado if estado is not None else estado_anterior
+            if tecnico_asignado is not None and tecnico_asignado != tecnico_anterior:
+                meta["tecnico_antes"] = tecnico_anterior
+                meta["tecnico_despues"] = tecnico_asignado
+
             if cambios_log:
-                self.registrar_log_ticket(id_ticket, "Actualización", " | ".join(cambios_log))
+                accion = "Cambio de estado" if estado is not None and estado != estado_anterior else "Actualización"
+                self.registrar_log_ticket(
+                    id_ticket,
+                    accion,
+                    " | ".join(cambios_log),
+                    usuario_op=usuario_op,
+                    origen=origen,
+                    estado_antes=estado_anterior,
+                    estado_despues=estado_final,
+                    meta=meta,
+                )
         except Exception:
             pass
         return True
@@ -1492,6 +1864,24 @@ class EscanerRed:
         except Exception as ex:
             print(f"[EscanerRed] Error descartando cambios IP de {mac}: {ex}")
             return False
+
+    def descartar_todos_cambios_ip(self) -> int:
+        """Descarta todas las alertas de cambio de IP y retorna cuántas había activas."""
+        try:
+            row = self._gestor._consultar_uno(
+                "SELECT COUNT(*) AS n FROM red WHERE CAMBIOS_IP > 0"
+            )
+            total = int(row["n"] if row else 0)
+            if total <= 0:
+                return 0
+
+            self._gestor._ejecutar(
+                "UPDATE red SET CAMBIOS_IP=0, IP_ANTERIOR=NULL WHERE CAMBIOS_IP > 0"
+            )
+            return total
+        except Exception as ex:
+            print(f"[EscanerRed] Error descartando todas las alertas IP: {ex}")
+            return 0
 
 
 # Alias de compatibilidad

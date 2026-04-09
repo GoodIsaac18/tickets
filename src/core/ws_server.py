@@ -47,6 +47,7 @@ _clientes_lock = threading.Lock()
 EVENTO_TICKET_CREADO    = "ticket_creado"
 EVENTO_TICKET_ACTUALIZADO = "ticket_actualizado"
 EVENTO_TICKET_CANCELADO = "ticket_cancelado"
+EVENTO_TICKET_CHAT_MENSAJE = "ticket_chat_mensaje"
 EVENTO_TECNICO_CAMBIO   = "tecnico_cambio"
 EVENTO_PING             = "ping"
 EVENTO_PONG             = "pong"

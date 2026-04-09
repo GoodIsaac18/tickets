@@ -25,7 +25,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-cov pylint black
+        pip install pytest pytest-cov pylint black pyinstaller
 
     - name: Lint with pylint
       run: |
@@ -37,7 +37,28 @@ jobs:
 
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=src --cov-report=xml
+        python -m pytest tests/ -v --cov=src.core.startup_guard --cov-report=xml --cov-fail-under=85
+
+    - name: Coverage gate data_access
+      run: |
+        python -m pytest tests/ -q --cov=core.data_access --cov-report=term-missing --cov-fail-under=38
+
+    - name: Startup smoke entrypoints
+      shell: pwsh
+      run: |
+        $env:TICKETS_SMOKE_STARTUP = "1"
+        python kubo.py
+        if ($LASTEXITCODE -ne 0) { throw "Smoke kubo falló" }
+        python kubito.py
+        if ($LASTEXITCODE -ne 0) { throw "Smoke kubito falló" }
+        $env:TICKETS_LICENSE_ADMIN_KEY = "test-admin-key-very-strong-123456"
+        python app_licencias.py
+        if ($LASTEXITCODE -ne 0) { throw "Smoke app_licencias falló" }
+
+    - name: PyInstaller smoke kubo
+      shell: pwsh
+      run: |
+        python -m PyInstaller --noconfirm --clean --onedir --name SmokeKubo --distpath runtime/smoke_dist --workpath runtime/smoke_build --specpath runtime/smoke_spec kubo.py
 
     - name: Smoke test tickets health
       shell: pwsh

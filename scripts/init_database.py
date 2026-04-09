@@ -19,14 +19,7 @@ RUNTIME_DIR = PROJECT_ROOT / "runtime"
 RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = RUNTIME_DIR / "tickets.db"
 
-TECNICOS_INICIALES = [
-    {"id": "TEC001", "nombre": "Carlos Rodriguez",  "especialidad": "Hardware/Red",
-     "telefono": "ext. 101", "email": "carlos.rodriguez@empresa.com"},
-    {"id": "TEC002", "nombre": "Maria Garcia",      "especialidad": "Software/Accesos",
-     "telefono": "ext. 102", "email": "maria.garcia@empresa.com"},
-    {"id": "TEC003", "nombre": "Luis Hernandez",    "especialidad": "Redes/Seguridad",
-     "telefono": "ext. 103", "email": "luis.hernandez@empresa.com"},
-]
+TECNICOS_INICIALES = []
 
 
 def crear_base_datos(borrar_existente: bool = False):
@@ -118,10 +111,10 @@ def crear_base_datos(borrar_existente: bool = False):
         "CREATE INDEX IF NOT EXISTS idx_tickets_usuario_mac "
         "ON tickets(USUARIO_AD, MAC_ADDRESS)")
 
-    # Técnicos iniciales (solo si la tabla está vacía)
+    # Técnicos iniciales (deshabilitado: no se crean técnicos por defecto)
     ahora = datetime.now().isoformat(sep=" ", timespec="seconds")
     n_antes = conn.execute("SELECT COUNT(*) FROM tecnicos").fetchone()[0]
-    if n_antes == 0:
+    if n_antes == 0 and TECNICOS_INICIALES:
         for t in TECNICOS_INICIALES:
             conn.execute(
                 """INSERT OR IGNORE INTO tecnicos
@@ -133,6 +126,8 @@ def crear_base_datos(borrar_existente: bool = False):
                  0, "", ahora, t["telefono"], t["email"])
             )
         print(f"  Tecnicos iniciales insertados: {len(TECNICOS_INICIALES)}")
+    elif n_antes == 0:
+        print("  Tecnicos iniciales: deshabilitados (tabla vacía)")
     else:
         print(f"  Tecnicos existentes: {n_antes} (no se sobreescribieron)")
 

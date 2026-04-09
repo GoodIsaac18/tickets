@@ -142,12 +142,14 @@ class InputValidator:
         if estado_nuevo not in InputValidator.ESTADOS_VALIDOS:
             return False, f"Estado inválido: {estado_nuevo}"
         
-        # Validaciones de transición lógica
+        # Flujo flexible:
+        # - Los estados terminales no pueden cambiarse desde validación de transición.
+        # - Entre estados activos se permite mover libremente para no bloquear operación.
         transiciones_validas = {
-            "Abierto": ["En Cola", "Cancelado"],
-            "En Cola": ["En Proceso", "Cancelado"],
-            "En Proceso": ["En Espera", "Cerrado", "Cancelado"],
-            "En Espera": ["En Proceso", "Cerrado", "Cancelado"],
+            "Abierto": ["En Cola", "En Proceso", "En Espera", "Cerrado", "Cancelado"],
+            "En Cola": ["Abierto", "En Proceso", "En Espera", "Cerrado", "Cancelado"],
+            "En Proceso": ["Abierto", "En Cola", "En Espera", "Cerrado", "Cancelado"],
+            "En Espera": ["Abierto", "En Cola", "En Proceso", "Cerrado", "Cancelado"],
             "Cerrado": [],
             "Cancelado": []
         }

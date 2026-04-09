@@ -291,33 +291,385 @@ class PanelAdminIT:
         self._perf_umbral_lento_ms = float(os.getenv("TICKETS_UI_SLOW_MS", "350"))
         self._perf_log_detallado = os.getenv("TICKETS_UI_PERF_VERBOSE", "0") == "1"
         self._prefs = load_app_preferences("kubo")
+        self._normalizar_preferencias_kubo()
         self._cfg_txt_contacto = None
         self._cfg_txt_mensaje = None
         self._cfg_sw_notificaciones = None
         self._cfg_sw_animaciones = None
         self._cfg_sw_diagnostico = None
+        self._cfg_sw_tema_oscuro = None
+        self._cfg_sw_modo_compacto = None
+        self._cfg_sw_auto_expandir_chat = None
+        self._cfg_sw_auto_respuestas = None
+        self._cfg_sw_autoasignacion = None
+        self._cfg_sw_chat_notif_externa = None
+        self._cfg_sw_menu_badges = None
+        self._cfg_sw_refresco_auto = None
+        self._cfg_sw_sonido_notificaciones = None
+        self._cfg_sw_abrir_chat_notif = None
+        self._cfg_sw_evitar_duplicados_chat = None
+        self._cfg_txt_auto_respuesta = None
+        self._cfg_dd_respuesta_modo = None
+        self._cfg_dd_autoasignacion = None
+        self._cfg_dd_notif_duracion = None
+        self._cfg_dd_refresco_auto = None
+        self._cfg_dd_tickets_page_size = None
+        self._cfg_dd_cola_page_size = None
+        self._cfg_dd_inventario_page_size = None
+        self._cfg_dd_reportes_page_size = None
+        self._cfg_dd_chat_historial = None
+        self._cfg_dd_chat_preview = None
+        self._cfg_dd_escaner_srv = None
+        self._cfg_dd_escaner_hist = None
+        self._cfg_dd_ui_density = None
+        self._chat_detalle_ticket_id = None
+        self._chat_detalle_list_ref = None
+        self._chat_detalle_txt_ref = None
+        self._chat_detalle_mensajes: List[Dict[str, Any]] = []
+        self._chat_detalle_activo: bool = False
+        
+        # Sistema de tracking de cambios en configuración
+        self._prefs_sin_guardar: Dict[str, Any] = {}
+        self._cfg_cambios_detectados: bool = False
+        self._cfg_search_query: str = ""
+        self._cfg_lbl_cambios = None
+        self._cfg_txt_search = None
+        self._cfg_help_text_dict = self._inicializar_help_text_config()
         
         self._configurar_pagina()
         self._construir_ui()
         self._iniciar_auto_refresh()
         self._iniciar_servidor_tickets()
         self._iniciar_backup_automatico()
+
+    def _normalizar_preferencias_kubo(self) -> None:
+        self._prefs.setdefault("ui", {})
+        self._prefs.setdefault("features", {})
+        self._prefs.setdefault("support", {})
+        self._prefs.setdefault("chat", {})
+        self._prefs.setdefault("views", {})
+
+        self._prefs["ui"].setdefault("mostrar_notificaciones", True)
+        self._prefs["ui"].setdefault("animaciones", True)
+        self._prefs["ui"].setdefault("tema_oscuro", True)
+        self._prefs["ui"].setdefault("modo_compacto", False)
+        self._prefs["ui"].setdefault("auto_expandir_chat", True)
+        self._prefs["ui"].setdefault("densidad", "normal")
+
+        self._prefs["features"].setdefault("diagnostico_rapido", True)
+        self._prefs["features"].setdefault("chat_auto_respuesta", True)
+        self._prefs["features"].setdefault("chat_autoasignacion", True)
+        self._prefs["features"].setdefault("chat_notificacion_externa", True)
+        self._prefs["features"].setdefault("menu_badges", True)
+        self._prefs["features"].setdefault("refresco_automatico", True)
+        self._prefs["features"].setdefault("abrir_chat_notificacion", True)
+        self._prefs["features"].setdefault("sonido_notificaciones", False)
+        self._prefs["features"].setdefault("evitar_duplicados_chat", True)
+
+        self._prefs["chat"].setdefault("mensaje_auto", "Recibimos tu mensaje. Un técnico te atenderá a la brevedad.")
+        self._prefs["chat"].setdefault("respuesta_modo", "primer_mensaje")
+        self._prefs["chat"].setdefault("autoasignacion_modo", "menor_carga")
+        self._prefs["chat"].setdefault("notificacion_duracion", "short")
+        self._prefs["chat"].setdefault("historial_limite", 30)
+        self._prefs["chat"].setdefault("preview_limite", 8)
+
+        self._prefs["views"].setdefault("tickets_page_size", 40)
+        self._prefs["views"].setdefault("cola_page_size", 8)
+        self._prefs["views"].setdefault("inventario_page_size", 40)
+        self._prefs["views"].setdefault("reportes_page_size", 4)
+        self._prefs["views"].setdefault("chat_historial_page_size", 30)
+        self._prefs["views"].setdefault("chat_preview_rows", 8)
+        self._prefs["views"].setdefault("escaner_srv_page_size", 40)
+        self._prefs["views"].setdefault("escaner_hist_page_size", 50)
+        self._prefs["views"].setdefault("auto_refresh_interval", 30)
+
+        self.auto_refresh = bool(self._prefs["features"].get("refresco_automatico", True))
+        self._tickets_page_size = int(self._prefs["views"].get("tickets_page_size", 40) or 40)
+        self._reportes_equipos_page_size = int(self._prefs["views"].get("reportes_page_size", 4) or 4)
+        self._inventario_page_size = int(self._prefs["views"].get("inventario_page_size", 40) or 40)
+        self._cola_page_size = int(self._prefs["views"].get("cola_page_size", 8) or 8)
+        self._escaner_srv_page_size = int(self._prefs["views"].get("escaner_srv_page_size", 40) or 40)
+        self._escaner_hist_page_size = int(self._prefs["views"].get("escaner_hist_page_size", 50) or 50)
+
+    def _prefs_bool(self, section: str, key: str, default: bool = False) -> bool:
+        return bool(self._prefs.get(section, {}).get(key, default))
+
+    def _prefs_int(self, section: str, key: str, default: int, min_value: int = 1, max_value: int = 9999) -> int:
+        try:
+            value = int(self._prefs.get(section, {}).get(key, default) or default)
+        except Exception:
+            value = default
+        return max(min_value, min(max_value, value))
+
+    def _prefs_str(self, section: str, key: str, default: str = "") -> str:
+        return str(self._prefs.get(section, {}).get(key, default) or default)
+
+    def _aplicar_configuracion_en_vivo(self) -> None:
+        try:
+            self.auto_refresh = self._prefs_bool("features", "refresco_automatico", True)
+            self.page.theme_mode = ft.ThemeMode.DARK if self._prefs_bool("ui", "tema_oscuro", True) else ft.ThemeMode.LIGHT
+        except Exception:
+            pass
+
+    def _intervalo_auto_refresh_segundos(self) -> int:
+        return self._prefs_int("views", "auto_refresh_interval", 30, 5, 300)
+
+    def _limite_chat_historial(self) -> int:
+        return self._prefs_int("chat", "historial_limite", 30, 10, 200)
+
+    def _limite_chat_preview(self) -> int:
+        return self._prefs_int("chat", "preview_limite", 8, 3, 20)
+
+    def _modo_respuesta_auto(self) -> str:
+        modo = self._prefs_str("chat", "respuesta_modo", "primer_mensaje").strip().lower()
+        return modo if modo in {"primer_mensaje", "siempre"} else "primer_mensaje"
+
+    def _modo_autoasignacion(self) -> str:
+        modo = self._prefs_str("chat", "autoasignacion_modo", "menor_carga").strip().lower()
+        return modo if modo in {"menor_carga", "primero_disponible"} else "menor_carga"
+
+    def _duracion_notificacion(self) -> str:
+        modo = self._prefs_str("chat", "notificacion_duracion", "short").strip().lower()
+        return modo if modo in {"short", "medium", "long"} else "short"
+    
+    def _inicializar_help_text_config(self) -> Dict[str, str]:
+        """Diccionario con textos de ayuda para cada control de configuración."""
+        return {
+            "mostrar_notificaciones": "Activar/desactivar todas las notificaciones del sistema",
+            "animaciones": "Mostrar efectos visuales y transiciones suaves",
+            "tema_oscuro": "Cambiar a tema oscuro para menos fatiga visual",
+            "modo_compacto": "Mostrar menos espacios en blanco para más información",
+            "auto_expandir_chat": "Expandir chat automáticamente cuando llega un mensaje",
+            "chat_auto_respuesta": "Enviar respuesta automática al recibir un ticket",
+            "respuesta_modo": "Responder solo en primer mensaje o en cada mensaje",
+            "chat_autoasignacion": "Asignar técnico automáticamente a nuevos tickets",
+            "autoasignacion_modo": "Asignar al técnico con menor carga o al primero disponible",
+            "chat_notificacion_externa": "Notificar nuevos mensajes cuando no abres el chat",
+            "evitar_duplicados_chat": "Evitar enviar respuestas duplicadas al mismo usuario",
+            "notificacion_duracion": "Duración que aparecen las notificaciones en pantalla",
+            "densidad": "Densidad de información mostrada en las vistas",
+            "tickets_page_size": "Cuántos tickets mostrar por página",
+            "cola_page_size": "Cuántos tickets en cola mostrar por página",
+            "inventario_page_size": "Cuántos equipos mostrar por página",
+            "reportes_page_size": "Cuántos reportes mostrar por página",
+            "historial_limite": "Cuántos mensajes cargar en el historial de chat",
+            "preview_limite": "Cuántos mensajes mostrar en la vista rápida",
+            "escaner_srv_page_size": "Cuántos equipos del escáner mostrar por página",
+            "escaner_hist_page_size": "Cuántos registros del historial mostrar",
+            "auto_refresh_interval": "Segundos entre actualizaciones automáticas",
+            "sonido_notificaciones": "Sonar cuando llega una notificación",
+            "abrir_chat_notif": "Abrir chat automáticamente al hacer clic en notificación",
+            "menu_badges": "Mostrar contadores de items pendientes en el menú",
+            "refresco_auto": "Recargar datos automáticamente",
+            "diagnostico_rapido": "Activar herramientas de diagnóstico rápido"
+        }
+    
+    def _detectar_cambios_config(self) -> bool:
+        """Detecta si hay cambios entre preferencias actuales y guardadas."""
+        import json
+        try:
+            prefs_str_actual = json.dumps(self._prefs_sin_guardar, sort_keys=True)
+            prefs_str_guardadas = json.dumps(self._prefs, sort_keys=True)
+            return prefs_str_actual != prefs_str_guardadas
+        except Exception:
+            return False
+    
+    def _actualizar_etiqueta_cambios(self) -> None:
+        """Actualiza la etiqueta de "Cambios sin guardar" en la UI."""
+        if self._cfg_lbl_cambios:
+            cambios = self._detectar_cambios_config()
+            self._cfg_cambios_detectados = cambios
+            if cambios:
+                self._cfg_lbl_cambios.value = "⚠️ CAMBIOS SIN GUARDAR"
+                self._cfg_lbl_cambios.color = "#FF9800"  # Naranja
+                self._cfg_lbl_cambios.visible = True
+            else:
+                self._cfg_lbl_cambios.visible = False
+            try:
+                self.page.update()
+            except Exception:
+                pass
+    
+    def _descartar_cambios_config(self, e=None) -> None:
+        """Descarta todos los cambios en la configuración sin guardar."""
+        self._prefs_sin_guardar = {}
+        self._cfg_cambios_detectados = False
+        if self._cfg_lbl_cambios:
+            self._cfg_lbl_cambios.visible = False
+        
+        # Recargar todos los controles con valores guardados
+        self._vista_actual = 7  # Fuerza reconstrucción de vista
+        try:
+            self.page.update()
+        except Exception:
+            pass
+    
+    def _aplicar_cambios_sin_guardar(self, e=None) -> None:
+        """Aplica cambios en sesión sin guardarlos a persistencia."""
+        if not self._prefs_sin_guardar:
+            return
+        
+        # Aplicar cambios (tema, refresco, etc.)
+        self._aplicar_configuracion_en_vivo()
+        self._actualizar_etiqueta_cambios()
+        
+        # Mostrar confirmación
+        snack = SnackBar(
+            content=Text("✓ Cambios aplicados en esta sesión (no guardados)", color="#4CAF50"),
+            duration=2000
+        )
+        self.page.overlay.append(snack)
+        snack.open = True
+        try:
+            self.page.update()
+        except Exception:
+            pass
+    
+    def _guardar_cambios_config(self, e=None) -> None:
+        """Guarda cambios de configuración a persistencia y aplica."""
+        if self._prefs_sin_guardar:
+            # Copiar cambios a preferencias guardadas
+            import copy
+            self._prefs = copy.deepcopy(self._prefs_sin_guardar)
+            self._normalizar_preferencias_kubo()
+        
+        self._guardar_preferencias_locales(e)
+        self._prefs_sin_guardar = {}
+        self._cfg_cambios_detectados = False
+        self._actualizar_etiqueta_cambios()
+        
+        snack = SnackBar(
+            content=Text("✓ Configuración guardada correctamente", color="#4CAF50"),
+            duration=2000
+        )
+        self.page.overlay.append(snack)
+        snack.open = True
+        try:
+            self.page.update()
+        except Exception:
+            pass
+    
+    def _on_config_change_tracked(self, control) -> None:
+        """Callback para cambios de controles que rastrea modificaciones."""
+        # Copiar preferencias actuales a sin_guardar si es primera vez
+        if not self._prefs_sin_guardar:
+            import copy
+            self._prefs_sin_guardar = copy.deepcopy(self._prefs)
+        
+        # Mapear el control a su preferencia correspondiente
+        # Switches
+        if control == self._cfg_sw_notificaciones:
+            self._prefs_sin_guardar["ui"]["mostrar_notificaciones"] = self._cfg_sw_notificaciones.value
+        elif control == self._cfg_sw_animaciones:
+            self._prefs_sin_guardar["ui"]["animaciones"] = self._cfg_sw_animaciones.value
+        elif control == self._cfg_sw_tema_oscuro:
+            self._prefs_sin_guardar["ui"]["tema_oscuro"] = self._cfg_sw_tema_oscuro.value
+        elif control == self._cfg_sw_modo_compacto:
+            self._prefs_sin_guardar["ui"]["modo_compacto"] = self._cfg_sw_modo_compacto.value
+        elif control == self._cfg_sw_auto_expandir_chat:
+            self._prefs_sin_guardar["ui"]["auto_expandir_chat"] = self._cfg_sw_auto_expandir_chat.value
+        elif control == self._cfg_sw_auto_respuestas:
+            self._prefs_sin_guardar["features"]["chat_auto_respuesta"] = self._cfg_sw_auto_respuestas.value
+        elif control == self._cfg_sw_autoasignacion:
+            self._prefs_sin_guardar["features"]["chat_autoasignacion"] = self._cfg_sw_autoasignacion.value
+        elif control == self._cfg_sw_chat_notif_externa:
+            self._prefs_sin_guardar["features"]["chat_notificacion_externa"] = self._cfg_sw_chat_notif_externa.value
+        elif control == self._cfg_sw_evitar_duplicados_chat:
+            self._prefs_sin_guardar["features"]["evitar_duplicados_chat"] = self._cfg_sw_evitar_duplicados_chat.value
+        elif control == self._cfg_sw_menu_badges:
+            self._prefs_sin_guardar["features"]["menu_badges"] = self._cfg_sw_menu_badges.value
+        elif control == self._cfg_sw_refresco_auto:
+            self._prefs_sin_guardar["features"]["refresco_automatico"] = self._cfg_sw_refresco_auto.value
+        elif control == self._cfg_sw_sonido_notificaciones:
+            self._prefs_sin_guardar["features"]["sonido_notificaciones"] = self._cfg_sw_sonido_notificaciones.value
+        elif control == self._cfg_sw_abrir_chat_notif:
+            self._prefs_sin_guardar["features"]["abrir_chat_notificacion"] = self._cfg_sw_abrir_chat_notif.value
+        elif control == self._cfg_sw_diagnostico:
+            self._prefs_sin_guardar["features"]["diagnostico_rapido"] = self._cfg_sw_diagnostico.value
+        # Dropdowns
+        elif control == self._cfg_dd_ui_density:
+            self._prefs_sin_guardar["ui"]["densidad"] = self._cfg_dd_ui_density.value
+        elif control == self._cfg_dd_respuesta_modo:
+            self._prefs_sin_guardar["chat"]["respuesta_modo"] = self._cfg_dd_respuesta_modo.value
+        elif control == self._cfg_dd_autoasignacion:
+            self._prefs_sin_guardar["chat"]["autoasignacion_modo"] = self._cfg_dd_autoasignacion.value
+        elif control == self._cfg_dd_notif_duracion:
+            self._prefs_sin_guardar["chat"]["notificacion_duracion"] = self._cfg_dd_notif_duracion.value
+        elif control == self._cfg_dd_refresco_auto:
+            try:
+                self._prefs_sin_guardar["views"]["auto_refresh_interval"] = int(self._cfg_dd_refresco_auto.value or "30")
+            except:
+                pass
+        elif control == self._cfg_dd_tickets_page_size:
+            try:
+                self._prefs_sin_guardar["views"]["tickets_page_size"] = int(self._cfg_dd_tickets_page_size.value or "40")
+            except:
+                pass
+        elif control == self._cfg_dd_cola_page_size:
+            try:
+                self._prefs_sin_guardar["views"]["cola_page_size"] = int(self._cfg_dd_cola_page_size.value or "8")
+            except:
+                pass
+        elif control == self._cfg_dd_inventario_page_size:
+            try:
+                self._prefs_sin_guardar["views"]["inventario_page_size"] = int(self._cfg_dd_inventario_page_size.value or "40")
+            except:
+                pass
+        elif control == self._cfg_dd_reportes_page_size:
+            try:
+                self._prefs_sin_guardar["views"]["reportes_page_size"] = int(self._cfg_dd_reportes_page_size.value or "4")
+            except:
+                pass
+        elif control == self._cfg_dd_chat_historial:
+            try:
+                self._prefs_sin_guardar["chat"]["historial_limite"] = int(self._cfg_dd_chat_historial.value or "30")
+            except:
+                pass
+        elif control == self._cfg_dd_chat_preview:
+            try:
+                self._prefs_sin_guardar["chat"]["preview_limite"] = int(self._cfg_dd_chat_preview.value or "8")
+            except:
+                pass
+        elif control == self._cfg_dd_escaner_srv:
+            try:
+                self._prefs_sin_guardar["views"]["escaner_srv_page_size"] = int(self._cfg_dd_escaner_srv.value or "40")
+            except:
+                pass
+        elif control == self._cfg_dd_escaner_hist:
+            try:
+                self._prefs_sin_guardar["views"]["escaner_hist_page_size"] = int(self._cfg_dd_escaner_hist.value or "50")
+            except:
+                pass
+        # TextFields
+        elif control == self._cfg_txt_auto_respuesta:
+            self._prefs_sin_guardar["chat"]["mensaje_auto"] = self._cfg_txt_auto_respuesta.value
+        elif control == self._cfg_txt_contacto:
+            self._prefs_sin_guardar["support"]["email"] = self._cfg_txt_contacto.value
+        
+        self._actualizar_etiqueta_cambios()
     
     def _configurar_pagina(self):
         """Configura las propiedades de la página."""
-        self.page.title = "🖥️ Kubo - Panel de Control IT"
+        self.page.title = "Kubo - Panel de Control IT"
         self.page.bgcolor = COLOR_FONDO
         self.page.padding = 0
         self.page.spacing = 0
         self.page.window.width = 1400
         self.page.window.height = 900
-        self.page.theme_mode = ft.ThemeMode.DARK
-        
-        # Establecer icono de la ventana
-        from pathlib import Path
-        icono_path = PROJECT_ROOT / "icons" / "receptora.png"
-        if icono_path.exists():
-            self.page.window.icon = str(icono_path)
+        self.page.window.title_bar_hidden = False
+        self.page.theme_mode = ft.ThemeMode.DARK if self._prefs_bool("ui", "tema_oscuro", True) else ft.ThemeMode.LIGHT
+
+        # Windows usa mejor .ico para el icono de barra; .png queda como respaldo.
+        icono_ico = PROJECT_ROOT / "icons" / "kubo.ico"
+        icono_png = PROJECT_ROOT / "icons" / "kubo.png"
+        if icono_ico.exists():
+            self.page.window.icon = str(icono_ico)
+        elif icono_png.exists():
+            self.page.window.icon = str(icono_png)
+
+    def _usuario_operador(self) -> str:
+        """Retorna el usuario operador para trazabilidad de auditoría."""
+        return os.getenv("USERNAME") or os.getenv("USER") or "Operador"
     
     def _construir_ui(self):
         """Construye la interfaz de usuario principal."""
@@ -380,6 +732,7 @@ class PanelAdminIT:
         )
         
         self.page.add(layout)
+        self._actualizar_badges_navegacion()
     
     def _construir_header(self) -> Container:
         """Construye el header superior con información del sistema."""
@@ -467,6 +820,11 @@ class PanelAdminIT:
                     label="Tickets"
                 ),
                 NavigationRailDestination(
+                    icon=icons.FORUM_OUTLINED,
+                    selected_icon=icons.FORUM,
+                    label="Chats"
+                ),
+                NavigationRailDestination(
                     icon=icons.QUEUE_OUTLINED,
                     selected_icon=icons.QUEUE,
                     label="Cola"
@@ -513,7 +871,21 @@ class PanelAdminIT:
     def _cambiar_vista(self, e):
         """Maneja el cambio de vista desde la navegación."""
         t0 = time.perf_counter()
-        self.vista_actual = e.control.selected_index
+        menu_a_vista = {
+            0: 0,   # Dashboard
+            1: 1,   # Tecnicos
+            2: 2,   # Tickets
+            3: 11,  # Chats
+            4: 3,   # Cola
+            5: 4,   # Historial
+            6: 5,   # Reportes
+            7: 6,   # Inventario
+            8: 7,   # Red/Escaneo
+            9: 8,   # Solicitudes
+            10: 9,  # Busqueda
+            11: 10, # Configuracion
+        }
+        self.vista_actual = menu_a_vista.get(e.control.selected_index, e.control.selected_index)
         self.contenido.content = self._obtener_vista(self.vista_actual)
         self.page.update()
         total_ms = (time.perf_counter() - t0) * 1000.0
@@ -535,6 +907,7 @@ class PanelAdminIT:
             self._vista_solicitudes,
             self._vista_busqueda_global,
             self._vista_configuracion_app,
+            self._vista_chats,
         ]
 
     def _obtener_vista(self, indice: int, forzar: bool = False):
@@ -586,20 +959,575 @@ class PanelAdminIT:
             "Solicitudes",
             "Búsqueda",
             "Configuración",
+            "Chats",
         ]
         return nombres[indice] if 0 <= indice < len(nombres) else f"Vista {indice}"
+
+    def _vista_chats(self) -> Column:
+        """Vista de conversaciones de chat agrupadas por departamento y usuario."""
+        import unicodedata
+
+        resumen = self.gestor.obtener_resumen_chats_tickets(limite=400)
+
+        if not resumen:
+            contenido_vacio = Column([
+                Row([
+                    Text("Chats de Tickets", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                ]),
+                Container(
+                    content=Column([
+                        Icon(icons.FORUM, size=42, color=COLOR_TEXTO_SEC),
+                        Text("Sin conversaciones aún", size=16, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                        Text("Los chats aparecerán cuando un ticket tenga mensajes.", size=12, color=COLOR_TEXTO_SEC),
+                    ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=6),
+                    bgcolor=COLOR_SUPERFICIE,
+                    border_radius=12,
+                    padding=20,
+                )
+            ], spacing=16, scroll=ScrollMode.AUTO)
+            return Column(
+                controls=[
+                    Container(
+                        content=contenido_vacio,
+                        padding=ft.Padding.symmetric(horizontal=2, vertical=0),
+                        expand=True,
+                    )
+                ],
+                scroll=ScrollMode.AUTO,
+                expand=True,
+                horizontal_alignment=CrossAxisAlignment.STRETCH,
+            )
+
+        departamentos = sorted({(x.get("categoria") or "Sin categoría") for x in resumen})
+        usuarios_disponibles = sorted({(x.get("usuario_ad") or "Sin usuario") for x in resumen})
+        estados_disponibles = sorted({(x.get("estado") or "-") for x in resumen})
+
+        dd_departamento = Dropdown(
+            label="Departamento",
+            width=220,
+            value="Todos",
+            options=[dropdown.Option("Todos")] + [dropdown.Option(d) for d in departamentos],
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+        dd_usuario = Dropdown(
+            label="Usuario",
+            width=220,
+            value="Todos",
+            options=[dropdown.Option("Todos")] + [dropdown.Option(u) for u in usuarios_disponibles],
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+        dd_estado = Dropdown(
+            label="Estado",
+            width=180,
+            value="Todos",
+            options=[dropdown.Option("Todos")] + [dropdown.Option(e) for e in estados_disponibles],
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+        txt_buscar = TextField(
+            label="Buscar por ticket o turno",
+            hint_text="Ej: 9A20EAFE o A-004",
+            prefix_icon=icons.SEARCH,
+            width=280,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+
+        resumen_text = Text("", size=11, color=COLOR_TEXTO_SEC)
+        contenedor_bloques = Column(spacing=12)
+
+        def _norm(valor: Any) -> str:
+            txt = str(valor or "").strip().lower()
+            txt = " ".join(txt.split())
+            return "".join(c for c in unicodedata.normalize("NFD", txt) if unicodedata.category(c) != "Mn")
+
+        def _render_chats_filtrados(e=None):
+            dep = dd_departamento.value or "Todos"
+            usu = dd_usuario.value or "Todos"
+            est = dd_estado.value or "Todos"
+            q = _norm(txt_buscar.value)
+
+            dep_norm = _norm(dep)
+            usu_norm = _norm(usu)
+            est_norm = _norm(est)
+
+            filtrado = []
+            for item in resumen:
+                categoria = (item.get("categoria") or "Sin categoría")
+                usuario = (item.get("usuario_ad") or "Sin usuario")
+                estado = (item.get("estado") or "-")
+                id_ticket = str(item.get("id_ticket") or "")
+                turno = str(item.get("turno") or "")
+
+                categoria_norm = _norm(categoria)
+                usuario_norm = _norm(usuario)
+                estado_norm = _norm(estado)
+                id_ticket_norm = _norm(id_ticket)
+                turno_norm = _norm(turno)
+
+                if dep_norm != _norm("Todos") and categoria_norm != dep_norm:
+                    continue
+                if usu_norm != _norm("Todos") and usuario_norm != usu_norm:
+                    continue
+                if est_norm != _norm("Todos") and estado_norm != est_norm:
+                    continue
+                if q and q not in id_ticket_norm and q not in turno_norm:
+                    continue
+                filtrado.append(item)
+
+            resumen_text.value = f"Mostrando {len(filtrado)} conversaciones"
+
+            if not filtrado:
+                contenedor_bloques.controls = [
+                    Container(
+                        content=Text("No hay resultados con esos filtros.", color=COLOR_TEXTO_SEC, size=12),
+                        bgcolor=COLOR_SUPERFICIE,
+                        border_radius=10,
+                        padding=12,
+                    )
+                ]
+                self.page.update()
+                return
+
+            agrupado: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+            for item in filtrado:
+                categoria = item.get("categoria", "Sin categoría") or "Sin categoría"
+                usuario = item.get("usuario_ad", "Sin usuario") or "Sin usuario"
+                agrupado.setdefault(categoria, {}).setdefault(usuario, []).append(item)
+
+            bloques = []
+            for categoria in sorted(agrupado.keys()):
+                usuarios = agrupado[categoria]
+                bloques_usuarios = []
+                for usuario in sorted(usuarios.keys()):
+                    tickets_usuario = usuarios[usuario]
+                    tarjetas = []
+                    for t in tickets_usuario:
+                        id_ticket = t.get("id_ticket", "")
+                        turno = t.get("turno", "-")
+                        estado = t.get("estado", "-")
+                        total = int(t.get("total_mensajes", 0) or 0)
+                        ultima = str(t.get("ultima_fecha", ""))[:16]
+
+                        tarjetas.append(
+                            Container(
+                                content=Row([
+                                    Column([
+                                        Text(f"Turno {turno}", size=12, weight=FontWeight.W_700, color=COLOR_ACENTO),
+                                        Text(f"Ticket #{id_ticket}", size=11, color=COLOR_TEXTO),
+                                        Text(f"Estado: {estado}", size=10, color=COLOR_TEXTO_SEC),
+                                    ], spacing=2, expand=True),
+                                    Column([
+                                        Text(f"{total} mensajes", size=11, weight=FontWeight.W_600, color=COLOR_INFO),
+                                        Text(ultima, size=10, color=COLOR_TEXTO_SEC),
+                                        ft.TextButton(
+                                            "Abrir chat",
+                                            icon=icons.OPEN_IN_NEW,
+                                            on_click=lambda e, tid=id_ticket: self._abrir_ticket_desde_chat(tid),
+                                        ),
+                                    ], spacing=2, horizontal_alignment=CrossAxisAlignment.END),
+                                ], spacing=10),
+                                bgcolor=COLOR_SUPERFICIE_2,
+                                border=ft.Border.all(1, COLOR_SUPERFICIE_3),
+                                border_radius=10,
+                                padding=10,
+                            )
+                        )
+
+                    bloques_usuarios.append(
+                        Container(
+                            content=Column([
+                                Row([
+                                    Icon(icons.PERSON, size=14, color=COLOR_INFO),
+                                    Text(usuario, size=13, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                                    Container(
+                                        content=Text(f"{len(tickets_usuario)}", size=10, color=colors.WHITE),
+                                        bgcolor=COLOR_INFO,
+                                        border_radius=10,
+                                        padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                                    )
+                                ], spacing=8),
+                                Column(tarjetas, spacing=8),
+                            ], spacing=8),
+                            bgcolor=COLOR_SUPERFICIE,
+                            border_radius=10,
+                            padding=10,
+                        )
+                    )
+
+                bloques.append(
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.BUSINESS, size=16, color=COLOR_PRIMARIO),
+                                Text(categoria, size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                                Container(
+                                    content=Text(f"{sum(len(v) for v in usuarios.values())} tickets", size=10, color=colors.WHITE),
+                                    bgcolor=COLOR_PRIMARIO,
+                                    border_radius=10,
+                                    padding=ft.Padding.symmetric(horizontal=8, vertical=3),
+                                )
+                            ], spacing=8),
+                            Column(bloques_usuarios, spacing=10),
+                        ], spacing=10),
+                        bgcolor=COLOR_SUPERFICIE,
+                        border_radius=12,
+                        border=ft.Border.all(1, COLOR_SUPERFICIE_3),
+                        padding=12,
+                    )
+                )
+
+            contenedor_bloques.controls = bloques
+            self.page.update()
+
+        dd_departamento.on_change = _render_chats_filtrados
+        dd_usuario.on_change = _render_chats_filtrados
+        dd_estado.on_change = _render_chats_filtrados
+        txt_buscar.on_change = _render_chats_filtrados
+
+        def _limpiar_filtros(e=None):
+            dd_departamento.value = "Todos"
+            dd_usuario.value = "Todos"
+            dd_estado.value = "Todos"
+            txt_buscar.value = ""
+            _render_chats_filtrados()
+
+        _render_chats_filtrados()
+
+        contenido_vista = Column([
+            # Encabezado elegante
+            self._crear_encabezado_seccion("💬", "Chats de Tickets",
+                                          "Conversaciones organizadas por departamento y usuario"),
+            
+            # Tarjeta de filtros mejorada
+            self._crear_card_filtros([
+                Row([
+                    dd_departamento,
+                    dd_usuario,
+                    dd_estado,
+                    txt_buscar,
+                ], spacing=10, wrap=True),
+                Container(height=8),
+                Row([
+                    ft.ElevatedButton("✓ Aplicar", icon=icons.FILTER_ALT, on_click=_render_chats_filtrados),
+                    ft.OutlinedButton("↺ Limpiar", icon=icons.CLEAR, on_click=_limpiar_filtros),
+                ], spacing=10)
+            ], "#4ECDC4"),
+            
+            Container(height=12),
+            resumen_text,
+            contenedor_bloques,
+        ], spacing=14, scroll=ScrollMode.AUTO, horizontal_alignment=CrossAxisAlignment.STRETCH)
+        return Column(
+            controls=[
+                Container(
+                    content=contenido_vista,
+                    padding=ft.Padding.symmetric(horizontal=2, vertical=0),
+                    expand=True,
+                )
+            ],
+            scroll=ScrollMode.AUTO,
+            expand=True,
+            horizontal_alignment=CrossAxisAlignment.STRETCH,
+        )
+
+    def _abrir_ticket_desde_chat(self, id_ticket: str):
+        """Abre el diálogo de detalle del ticket desde la vista de chats."""
+        try:
+            ticket = self.gestor.obtener_ticket_por_id(id_ticket)
+            if not ticket:
+                self._mostrar_advertencia("Ticket no encontrado", f"No existe el ticket #{id_ticket}")
+                return
+            self._mostrar_dialogo_chat_rapido(ticket)
+        except Exception as ex:
+            self._mostrar_error("No se pudo abrir el ticket", str(ex))
+
+    def _mostrar_dialogo_chat_rapido(self, ticket: Dict[str, Any]) -> None:
+        """Diálogo compacto para chat: solo conversación y cambio de estado."""
+        id_ticket = str(ticket.get("ID_TICKET", "") or "").strip()
+        if not id_ticket:
+            self._mostrar_advertencia("Ticket inválido")
+            return
+
+        estado_actual = str(ticket.get("ESTADO", "Abierto") or "Abierto")
+        turno = str(ticket.get("TURNO", "-") or "-")
+
+        chat_list = ListView(height=360, spacing=8, auto_scroll=True)
+        txt_chat = TextField(
+            label="Escribe tu mensaje",
+            hint_text="Responder al usuario...",
+            multiline=True,
+            min_lines=2,
+            max_lines=4,
+            expand=True,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            prefix_icon=icons.FORUM,
+        )
+
+        dd_estado = Dropdown(
+            label="Estado del ticket",
+            value=estado_actual,
+            options=[dropdown.Option(e) for e in ESTADOS_TICKET],
+            width=230,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+        )
+
+        self._chat_detalle_ticket_id = id_ticket
+        self._chat_detalle_list_ref = chat_list
+        self._chat_detalle_txt_ref = txt_chat
+        self._chat_detalle_activo = True
+
+        dialogo = None
+
+        def cerrar_dialogo(e=None):
+            nonlocal dialogo
+            if dialogo:
+                dialogo.open = False
+                self._reset_chat_detalle_contexto()
+                self.page.update()
+
+        def refrescar_chat(e=None):
+            try:
+                self._chat_detalle_actualizar(ticket, chat_list=chat_list, recargar=True)
+            except Exception:
+                pass
+
+        def cambiar_estado(e=None):
+            try:
+                nuevo_estado = dd_estado.value or estado_actual
+                if nuevo_estado == estado_actual:
+                    return
+
+                if InputValidator is not None:
+                    ok, err = InputValidator.validar_estado_cambio(estado_actual, nuevo_estado)
+                    if not ok:
+                        self._mostrar_advertencia(err or "Transición de estado inválida")
+                        dd_estado.value = estado_actual
+                        self.page.update()
+                        return
+
+                self.gestor.actualizar_ticket(
+                    id_ticket,
+                    estado=nuevo_estado,
+                    usuario_op=self._usuario_operador(),
+                    origen="kubo.chat.rapido",
+                )
+
+                try:
+                    import ws_server as _ws
+                    _ws.broadcast_global(
+                        _ws.EVENTO_TICKET_ACTUALIZADO,
+                        {"id_ticket": id_ticket, "estado": nuevo_estado},
+                    )
+                except Exception:
+                    pass
+
+                ticket["ESTADO"] = nuevo_estado
+                self._mostrar_snackbar(f"Estado actualizado: {nuevo_estado}", COLOR_EXITO)
+                self._actualizar_badges_navegacion()
+                self._refrescar_vista()
+            except Exception as ex:
+                self._mostrar_error("No se pudo cambiar el estado", str(ex))
+
+        def enviar_chat(e):
+            if (ticket.get("ESTADO") or "") in {"Cerrado", "Cancelado"}:
+                self._mostrar_advertencia("Este ticket ya no permite escribir porque está cerrado o cancelado.")
+                return
+
+            mensaje = (txt_chat.value or "").strip()
+            if not mensaje:
+                return
+            try:
+                msg = self.gestor.agregar_mensaje_chat_ticket(
+                    id_ticket=id_ticket,
+                    autor_tipo="tecnico",
+                    autor_id=self._usuario_operador(),
+                    mensaje=mensaje,
+                )
+                if not msg:
+                    self._mostrar_error("Chat", "No se pudo guardar el mensaje")
+                    return
+
+                try:
+                    import ws_server as _ws
+                    _ws.broadcast_global(_ws.EVENTO_TICKET_CHAT_MENSAJE, {"mensaje_chat": msg})
+                except Exception:
+                    pass
+
+                txt_chat.value = ""
+                self._chat_detalle_actualizar(ticket, chat_list=chat_list, mensaje_nuevo=msg)
+                self._actualizar_badges_navegacion()
+            except Exception as ex:
+                self._mostrar_error("Chat", str(ex))
+
+        dialogo = AlertDialog(
+            modal=True,
+            shape=ft.RoundedRectangleBorder(radius=16),
+            bgcolor=COLOR_SUPERFICIE,
+            title=Row([
+                Container(
+                    content=Icon(icons.FORUM, size=20, color=colors.WHITE),
+                    bgcolor=COLOR_PRIMARIO,
+                    padding=8,
+                    border_radius=8,
+                ),
+                Column([
+                    Text(f"Chat • Ticket #{id_ticket}", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    Text(f"Turno {turno}", size=11, color=COLOR_TEXTO_SEC),
+                ], spacing=2, expand=True),
+                dd_estado,
+                ft.IconButton(icon=icons.SAVE, tooltip="Guardar estado", on_click=cambiar_estado),
+            ], spacing=10, vertical_alignment=CrossAxisAlignment.CENTER),
+            content=Container(
+                content=Column([
+                    Row([
+                        Text("Conversación", size=13, weight=FontWeight.W_600, color=COLOR_ACENTO),
+                        Container(expand=True),
+                        ft.TextButton("Refrescar", icon=icons.REFRESH, on_click=refrescar_chat),
+                    ]),
+                    Container(
+                        content=chat_list,
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        border=ft.Border.all(1, COLOR_SUPERFICIE_3),
+                        border_radius=12,
+                        padding=10,
+                    ),
+                    Row([
+                        txt_chat,
+                        ft.FilledButton("Enviar", icon=icons.SEND, on_click=enviar_chat),
+                    ], vertical_alignment=CrossAxisAlignment.END),
+                ], spacing=12),
+                width=760,
+                height=560,
+                padding=4,
+            ),
+            actions=[
+                ft.TextButton("Cerrar", icon=icons.CLOSE, on_click=cerrar_dialogo),
+            ],
+            actions_alignment=MainAxisAlignment.END,
+        )
+
+        refrescar_chat()
+        self.page.show_dialog(dialogo)
 
     def _guardar_preferencias_locales(self, e=None):
         self._prefs.setdefault("ui", {})
         self._prefs.setdefault("features", {})
         self._prefs.setdefault("support", {})
+        self._prefs.setdefault("chat", {})
+        self._prefs.setdefault("views", {})
         self._prefs["ui"]["mostrar_notificaciones"] = bool(self._cfg_sw_notificaciones.value) if self._cfg_sw_notificaciones else True
         self._prefs["ui"]["animaciones"] = bool(self._cfg_sw_animaciones.value) if self._cfg_sw_animaciones else True
+        self._prefs["ui"]["tema_oscuro"] = bool(self._cfg_sw_tema_oscuro.value) if self._cfg_sw_tema_oscuro else True
+        self._prefs["ui"]["modo_compacto"] = bool(self._cfg_sw_modo_compacto.value) if self._cfg_sw_modo_compacto else False
+        self._prefs["ui"]["auto_expandir_chat"] = bool(self._cfg_sw_auto_expandir_chat.value) if self._cfg_sw_auto_expandir_chat else True
+        self._prefs["ui"]["densidad"] = self._cfg_dd_ui_density.value if self._cfg_dd_ui_density and self._cfg_dd_ui_density.value else "normal"
         self._prefs["features"]["diagnostico_rapido"] = bool(self._cfg_sw_diagnostico.value) if self._cfg_sw_diagnostico else True
+        self._prefs["features"]["chat_auto_respuesta"] = bool(self._cfg_sw_auto_respuestas.value) if self._cfg_sw_auto_respuestas else True
+        self._prefs["features"]["chat_autoasignacion"] = bool(self._cfg_sw_autoasignacion.value) if self._cfg_sw_autoasignacion else True
+        self._prefs["features"]["chat_notificacion_externa"] = bool(self._cfg_sw_chat_notif_externa.value) if self._cfg_sw_chat_notif_externa else True
+        self._prefs["features"]["menu_badges"] = bool(self._cfg_sw_menu_badges.value) if self._cfg_sw_menu_badges else True
+        self._prefs["features"]["refresco_automatico"] = bool(self._cfg_sw_refresco_auto.value) if self._cfg_sw_refresco_auto else True
+        self._prefs["features"]["abrir_chat_notificacion"] = bool(self._cfg_sw_abrir_chat_notif.value) if self._cfg_sw_abrir_chat_notif else True
+        self._prefs["features"]["sonido_notificaciones"] = bool(self._cfg_sw_sonido_notificaciones.value) if self._cfg_sw_sonido_notificaciones else False
+        self._prefs["features"]["evitar_duplicados_chat"] = bool(self._cfg_sw_evitar_duplicados_chat.value) if self._cfg_sw_evitar_duplicados_chat else True
+        self._prefs["chat"]["respuesta_modo"] = self._cfg_dd_respuesta_modo.value if self._cfg_dd_respuesta_modo and self._cfg_dd_respuesta_modo.value else "primer_mensaje"
+        self._prefs["chat"]["autoasignacion_modo"] = self._cfg_dd_autoasignacion.value if self._cfg_dd_autoasignacion and self._cfg_dd_autoasignacion.value else "menor_carga"
+        self._prefs["chat"]["notificacion_duracion"] = self._cfg_dd_notif_duracion.value if self._cfg_dd_notif_duracion and self._cfg_dd_notif_duracion.value else "short"
         if self._cfg_txt_contacto:
             self._prefs["support"]["email"] = self._cfg_txt_contacto.value.strip()
+        if self._cfg_txt_auto_respuesta:
+            self._prefs["chat"]["mensaje_auto"] = self._cfg_txt_auto_respuesta.value.strip()
+        if self._cfg_dd_tickets_page_size:
+            self._prefs["views"]["tickets_page_size"] = int(self._cfg_dd_tickets_page_size.value or 40)
+        if self._cfg_dd_cola_page_size:
+            self._prefs["views"]["cola_page_size"] = int(self._cfg_dd_cola_page_size.value or 8)
+        if self._cfg_dd_inventario_page_size:
+            self._prefs["views"]["inventario_page_size"] = int(self._cfg_dd_inventario_page_size.value or 40)
+        if self._cfg_dd_reportes_page_size:
+            self._prefs["views"]["reportes_page_size"] = int(self._cfg_dd_reportes_page_size.value or 4)
+        if self._cfg_dd_chat_historial:
+            self._prefs["chat"]["historial_limite"] = int(self._cfg_dd_chat_historial.value or 30)
+        if self._cfg_dd_chat_preview:
+            self._prefs["chat"]["preview_limite"] = int(self._cfg_dd_chat_preview.value or 8)
+        if self._cfg_dd_escaner_srv:
+            self._prefs["views"]["escaner_srv_page_size"] = int(self._cfg_dd_escaner_srv.value or 40)
+        if self._cfg_dd_escaner_hist:
+            self._prefs["views"]["escaner_hist_page_size"] = int(self._cfg_dd_escaner_hist.value or 50)
+        if self._cfg_dd_refresco_auto:
+            self._prefs["views"]["auto_refresh_interval"] = int(self._cfg_dd_refresco_auto.value or 30)
         save_app_preferences("kubo", self._prefs)
+        self._normalizar_preferencias_kubo()
+        self._aplicar_configuracion_en_vivo()
+        self._actualizar_badges_navegacion()
         self._mostrar_snackbar("✓ Preferencias guardadas", COLOR_EXITO)
+
+    def _restaurar_preferencias_recomendadas(self, e=None):
+        """Restaura valores recomendados para automatizaciones opcionales."""
+        try:
+            if self._cfg_sw_notificaciones:
+                self._cfg_sw_notificaciones.value = True
+            if self._cfg_sw_animaciones:
+                self._cfg_sw_animaciones.value = True
+            if self._cfg_sw_diagnostico:
+                self._cfg_sw_diagnostico.value = True
+            if self._cfg_sw_tema_oscuro:
+                self._cfg_sw_tema_oscuro.value = True
+            if self._cfg_sw_modo_compacto:
+                self._cfg_sw_modo_compacto.value = False
+            if self._cfg_sw_auto_expandir_chat:
+                self._cfg_sw_auto_expandir_chat.value = True
+            if self._cfg_sw_auto_respuestas:
+                self._cfg_sw_auto_respuestas.value = True
+            if self._cfg_sw_autoasignacion:
+                self._cfg_sw_autoasignacion.value = True
+            if self._cfg_sw_chat_notif_externa:
+                self._cfg_sw_chat_notif_externa.value = True
+            if self._cfg_sw_menu_badges:
+                self._cfg_sw_menu_badges.value = True
+            if self._cfg_sw_refresco_auto:
+                self._cfg_sw_refresco_auto.value = True
+            if self._cfg_sw_sonido_notificaciones:
+                self._cfg_sw_sonido_notificaciones.value = False
+            if self._cfg_sw_abrir_chat_notif:
+                self._cfg_sw_abrir_chat_notif.value = True
+            if self._cfg_sw_evitar_duplicados_chat:
+                self._cfg_sw_evitar_duplicados_chat.value = True
+            if self._cfg_dd_respuesta_modo:
+                self._cfg_dd_respuesta_modo.value = "primer_mensaje"
+            if self._cfg_dd_autoasignacion:
+                self._cfg_dd_autoasignacion.value = "menor_carga"
+            if self._cfg_dd_notif_duracion:
+                self._cfg_dd_notif_duracion.value = "short"
+            if self._cfg_dd_tickets_page_size:
+                self._cfg_dd_tickets_page_size.value = "40"
+            if self._cfg_dd_cola_page_size:
+                self._cfg_dd_cola_page_size.value = "8"
+            if self._cfg_dd_inventario_page_size:
+                self._cfg_dd_inventario_page_size.value = "40"
+            if self._cfg_dd_reportes_page_size:
+                self._cfg_dd_reportes_page_size.value = "4"
+            if self._cfg_dd_chat_historial:
+                self._cfg_dd_chat_historial.value = "30"
+            if self._cfg_dd_chat_preview:
+                self._cfg_dd_chat_preview.value = "8"
+            if self._cfg_dd_escaner_srv:
+                self._cfg_dd_escaner_srv.value = "40"
+            if self._cfg_dd_escaner_hist:
+                self._cfg_dd_escaner_hist.value = "50"
+            if self._cfg_dd_refresco_auto:
+                self._cfg_dd_refresco_auto.value = "30"
+            if self._cfg_txt_auto_respuesta:
+                self._cfg_txt_auto_respuesta.value = "Recibimos tu mensaje. Un técnico te atenderá a la brevedad."
+
+            self._guardar_preferencias_locales()
+            self.page.update()
+        except Exception as ex:
+            self._mostrar_error(f"No se pudieron restaurar preferencias: {ex}")
 
     def _verificar_licencia_desde_config(self, e=None):
         resultado = verify_license_now("receptora")
@@ -630,94 +1558,465 @@ class PanelAdminIT:
         else:
             self._mostrar_error(f"No se pudo enviar: {envio.get('error', 'error desconocido')}", "Soporte")
 
-    def _vista_configuracion_app(self) -> Column:
-        licencia = read_license_status()
+    def _crear_control_config_con_ayuda(self, control, help_text: str = "") -> Container:
+        """Envuelve un control con texto de ayuda debajo con estilo mejorado."""
+        contenido = [control]
+        if help_text:
+            contenido.append(
+                Text(help_text, size=9, color=COLOR_TEXTO_SEC, italic=True, weight=FontWeight.W_400)
+            )
+        return Container(
+            content=Column(contenido, spacing=3),
+            padding=ft.Padding.only(bottom=4, top=2),
+            margin=ft.Margin.only(bottom=8)
+        )
+    
+    def _crear_card_seccion_elegante(self, icono: str, titulo: str, controles: List, color_icono: str = "#FF6B6B") -> Card:
+        """Crea una tarjeta de sección elegante con ícono, título y controles."""
+        header = Container(
+            content=Row([
+                Icon(icono, size=24, color=color_icono),
+                Text(titulo, size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO, expand=True),
+            ], spacing=12, vertical_alignment=CrossAxisAlignment.CENTER),
+            padding=ft.Padding.only(bottom=12, top=0),
+        )
+        
+        contenido_col = Column([header, Divider(height=1, color="#404040")] + controles + [Container(height=4)], spacing=6)
+        
+        return Card(
+            content=Container(
+                content=contenido_col,
+                padding=16,
+            ),
+            elevation=2,
+        )
 
+    def _crear_encabezado_seccion(self, emoji: str, titulo: str, subtitulo: str = "", color_titulo: str = COLOR_TEXTO) -> Container:
+        """Crea un encabezado elegante con emoji, título y subtítulo opcional."""
+        return Container(
+            content=Column([
+                Text(f"{emoji} {titulo}", size=24, weight=FontWeight.BOLD, color=color_titulo),
+                Text(subtitulo, size=12, color=COLOR_TEXTO_SEC, weight=FontWeight.W_400) if subtitulo else Container(height=0),
+            ], spacing=2),
+            padding=ft.Padding.only(bottom=16, top=6),
+        )
+
+    def _crear_card_filtros(self, controles: List, color_icono: str = "#45B7D1") -> Card:
+        """Crea una tarjeta elegante para filtros con estilo consistente."""
+        header = Row([
+            Icon(icons.TUNE, size=20, color=color_icono),
+            Text("Filtros y Búsqueda", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO, expand=True),
+        ], spacing=10, vertical_alignment=CrossAxisAlignment.CENTER)
+        
+        contenido = Column([header, Divider(height=1, color="#404040"), Container(height=4)] + controles + [Container(height=4)], spacing=8)
+        
+        return Card(
+            content=Container(content=contenido, padding=16),
+            elevation=2,
+        )
+
+    def _crear_card_resumen(self, titulo: str, valor: str, icono: str, color_icono: str, subtitulo: str = "", width: int = 280) -> Card:
+        """Crea una tarjeta de resumen/stat con icono y valor."""
+        return Card(
+            content=Container(
+                width=width,
+                content=Column([
+                    Row([
+                        Icon(icono, size=28, color=color_icono),
+                        Column([
+                            Text(titulo, size=11, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
+                            Text(valor, size=18, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                            Text(subtitulo, size=10, color=COLOR_TEXTO_SEC) if subtitulo else Container(height=0),
+                        ], spacing=2),
+                    ], spacing=12, vertical_alignment=CrossAxisAlignment.CENTER),
+                ], spacing=6),
+                padding=12,
+            ),
+            elevation=1,
+        )
+
+    def _envolver_layout_centrado(self, contenido, max_width: int = 1120, padding_h: int = 8) -> Container:
+        """Envuelve una vista en un contenedor centrado con ancho máximo uniforme."""
+        return Container(
+            content=Row(
+                [Container(content=contenido, width=max_width, expand=False)],
+                alignment=MainAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding.symmetric(horizontal=padding_h, vertical=0),
+            expand=True,
+        )
+    
+    def _construir_tab_interfaz(self) -> Column:
         self._cfg_sw_notificaciones = Switch(
             label="Notificaciones activas",
             value=bool(self._prefs.get("ui", {}).get("mostrar_notificaciones", True)),
-            on_change=self._guardar_preferencias_locales,
+            on_change=self._on_config_change_tracked,
         )
         self._cfg_sw_animaciones = Switch(
             label="Animaciones de interfaz",
             value=bool(self._prefs.get("ui", {}).get("animaciones", True)),
-            on_change=self._guardar_preferencias_locales,
+            on_change=self._on_config_change_tracked,
         )
+        self._cfg_sw_tema_oscuro = Switch(
+            label="Tema oscuro",
+            value=bool(self._prefs.get("ui", {}).get("tema_oscuro", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_sw_modo_compacto = Switch(
+            label="Modo compacto",
+            value=bool(self._prefs.get("ui", {}).get("modo_compacto", False)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_sw_auto_expandir_chat = Switch(
+            label="Expandir chat automáticamente",
+            value=bool(self._prefs.get("ui", {}).get("auto_expandir_chat", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_dd_ui_density = Dropdown(
+            label="Densidad visual",
+            value=self._prefs.get("ui", {}).get("densidad", "normal"),
+            options=[dropdown.Option("compacta"), dropdown.Option("normal"), dropdown.Option("amplia")],
+        )
+        self._cfg_dd_ui_density.on_change = self._on_config_change_tracked
+        self._cfg_sw_refresco_auto = Switch(
+            label="Auto-refresco de paneles",
+            value=bool(self._prefs.get("features", {}).get("refresco_automatico", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_dd_refresco_auto = Dropdown(
+            label="Intervalo de auto-refresco (seg)",
+            value=str(self._prefs.get("views", {}).get("auto_refresh_interval", 30)),
+            options=[dropdown.Option(v) for v in ["5", "10", "15", "30", "60", "120"]],
+        )
+        self._cfg_dd_refresco_auto.on_change = self._on_config_change_tracked
+        self._cfg_sw_sonido_notificaciones = Switch(
+            label="Sonido en notificaciones",
+            value=bool(self._prefs.get("features", {}).get("sonido_notificaciones", False)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_sw_abrir_chat_notif = Switch(
+            label="Abrir chat al hacer clic en notificación",
+            value=bool(self._prefs.get("features", {}).get("abrir_chat_notificacion", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_sw_menu_badges = Switch(
+            label="Mostrar contadores en menú lateral",
+            value=bool(self._prefs.get("features", {}).get("menu_badges", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        
+        return Column([
+            Text("🎨 Interfaz y Apariencia", size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+            Container(height=4),
+            self._crear_control_config_con_ayuda(self._cfg_sw_notificaciones, self._cfg_help_text_dict.get("mostrar_notificaciones", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_animaciones, self._cfg_help_text_dict.get("animaciones", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_tema_oscuro, self._cfg_help_text_dict.get("tema_oscuro", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_modo_compacto, self._cfg_help_text_dict.get("modo_compacto", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_auto_expandir_chat, self._cfg_help_text_dict.get("auto_expandir_chat", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_ui_density, self._cfg_help_text_dict.get("densidad", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_refresco_auto, self._cfg_help_text_dict.get("refresco_auto", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_refresco_auto, self._cfg_help_text_dict.get("auto_refresh_interval", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_sonido_notificaciones, self._cfg_help_text_dict.get("sonido_notificaciones", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_abrir_chat_notif, self._cfg_help_text_dict.get("abrir_chat_notif", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_menu_badges, self._cfg_help_text_dict.get("menu_badges", "")),
+            Container(height=12),
+        ], spacing=6, scroll=ScrollMode.AUTO)
+    
+    def _construir_tab_chat(self) -> Column:
+        """Construye el tab de configuración de chat inteligente."""
+        self._cfg_sw_auto_respuestas = Switch(
+            label="Respuestas automáticas de chat",
+            value=bool(self._prefs.get("features", {}).get("chat_auto_respuesta", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_dd_respuesta_modo = Dropdown(
+            label="Modo de respuesta automática",
+            value=self._prefs.get("chat", {}).get("respuesta_modo", "primer_mensaje"),
+            options=[dropdown.Option("primer_mensaje"), dropdown.Option("siempre")],
+        )
+        self._cfg_dd_respuesta_modo.on_change = self._on_config_change_tracked
+        self._cfg_sw_autoasignacion = Switch(
+            label="Autoasignar técnico por disponibilidad",
+            value=bool(self._prefs.get("features", {}).get("chat_autoasignacion", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_dd_autoasignacion = Dropdown(
+            label="Estrategia de autoasignación",
+            value=self._prefs.get("chat", {}).get("autoasignacion_modo", "menor_carga"),
+            options=[dropdown.Option("menor_carga"), dropdown.Option("primero_disponible")],
+        )
+        self._cfg_dd_autoasignacion.on_change = self._on_config_change_tracked
+        self._cfg_sw_chat_notif_externa = Switch(
+            label="Notificar cuando no estoy en chat",
+            value=bool(self._prefs.get("features", {}).get("chat_notificacion_externa", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_sw_evitar_duplicados_chat = Switch(
+            label="Evitar respuestas automáticas duplicadas",
+            value=bool(self._prefs.get("features", {}).get("evitar_duplicados_chat", True)),
+            on_change=self._on_config_change_tracked,
+        )
+        self._cfg_dd_notif_duracion = Dropdown(
+            label="Duración de notificaciones",
+            value=self._prefs.get("chat", {}).get("notificacion_duracion", "short"),
+            options=[dropdown.Option("short"), dropdown.Option("medium"), dropdown.Option("long")],
+        )
+        self._cfg_dd_notif_duracion.on_change = self._on_config_change_tracked
+        self._cfg_txt_auto_respuesta = TextField(
+            label="Plantilla de respuesta automática",
+            value=str(self._prefs.get("chat", {}).get("mensaje_auto", "Recibimos tu mensaje.")),
+            multiline=True,
+            min_lines=2,
+            max_lines=3,
+            on_blur=self._on_config_change_tracked,
+        )
+        self._cfg_dd_chat_historial = Dropdown(
+            label="Historial de chat (mensajes)",
+            value=str(self._prefs.get("chat", {}).get("historial_limite", 30)),
+            options=[dropdown.Option(v) for v in ["10", "20", "30", "50", "100", "150"]],
+        )
+        self._cfg_dd_chat_historial.on_change = self._on_config_change_tracked
+        self._cfg_dd_chat_preview = Dropdown(
+            label="Mensajes visibles en vista rápida",
+            value=str(self._prefs.get("chat", {}).get("preview_limite", 8)),
+            options=[dropdown.Option(v) for v in ["3", "5", "8", "10", "12", "15"]],
+        )
+        self._cfg_dd_chat_preview.on_change = self._on_config_change_tracked
+        
+        return Column([
+            Text("💬 Configuración de Chat Inteligente", size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+            Container(height=4),
+            self._crear_control_config_con_ayuda(self._cfg_sw_auto_respuestas, self._cfg_help_text_dict.get("chat_auto_respuesta", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_respuesta_modo, self._cfg_help_text_dict.get("respuesta_modo", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_autoasignacion, self._cfg_help_text_dict.get("chat_autoasignacion", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_autoasignacion, self._cfg_help_text_dict.get("autoasignacion_modo", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_chat_notif_externa, self._cfg_help_text_dict.get("chat_notificacion_externa", "")),
+            self._crear_control_config_con_ayuda(self._cfg_sw_evitar_duplicados_chat, self._cfg_help_text_dict.get("evitar_duplicados_chat", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_notif_duracion, self._cfg_help_text_dict.get("notificacion_duracion", "")),
+            self._crear_control_config_con_ayuda(self._cfg_txt_auto_respuesta, "Mensaje que recibirá el usuario al abrir un ticket"),
+            self._crear_control_config_con_ayuda(self._cfg_dd_chat_historial, self._cfg_help_text_dict.get("historial_limite", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_chat_preview, self._cfg_help_text_dict.get("preview_limite", "")),
+            Container(height=12),
+        ], spacing=6, scroll=ScrollMode.AUTO)
+    
+    def _construir_tab_paneles(self) -> Column:
+        """Construye el tab de tamaño de páginas y paneles."""
+        self._cfg_dd_tickets_page_size = Dropdown(
+            label="Tickets por página",
+            value=str(self._prefs.get("views", {}).get("tickets_page_size", 40)),
+            options=[dropdown.Option(v) for v in ["20", "40", "60", "80", "100"]],
+        )
+        self._cfg_dd_tickets_page_size.on_change = self._on_config_change_tracked
+        self._cfg_dd_cola_page_size = Dropdown(
+            label="Cola por página",
+            value=str(self._prefs.get("views", {}).get("cola_page_size", 8)),
+            options=[dropdown.Option(v) for v in ["4", "8", "12", "16", "20"]],
+        )
+        self._cfg_dd_cola_page_size.on_change = self._on_config_change_tracked
+        self._cfg_dd_inventario_page_size = Dropdown(
+            label="Inventario por página",
+            value=str(self._prefs.get("views", {}).get("inventario_page_size", 40)),
+            options=[dropdown.Option(v) for v in ["20", "40", "60", "80", "100"]],
+        )
+        self._cfg_dd_inventario_page_size.on_change = self._on_config_change_tracked
+        self._cfg_dd_reportes_page_size = Dropdown(
+            label="Reportes por página",
+            value=str(self._prefs.get("views", {}).get("reportes_page_size", 4)),
+            options=[dropdown.Option(v) for v in ["4", "6", "8", "10"]],
+        )
+        self._cfg_dd_reportes_page_size.on_change = self._on_config_change_tracked
+        self._cfg_dd_escaner_srv = Dropdown(
+            label="Registros del escáner por página",
+            value=str(self._prefs.get("views", {}).get("escaner_srv_page_size", 40)),
+            options=[dropdown.Option(v) for v in ["20", "40", "60", "80", "100"]],
+        )
+        self._cfg_dd_escaner_srv.on_change = self._on_config_change_tracked
+        self._cfg_dd_escaner_hist = Dropdown(
+            label="Historial de red por página",
+            value=str(self._prefs.get("views", {}).get("escaner_hist_page_size", 50)),
+            options=[dropdown.Option(v) for v in ["20", "50", "80", "100", "150"]],
+        )
+        self._cfg_dd_escaner_hist.on_change = self._on_config_change_tracked
+        
+        return Column([
+            Text("📊 Tamaño de Paneles y Tablas", size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+            Container(height=4),
+            self._crear_control_config_con_ayuda(self._cfg_dd_tickets_page_size, self._cfg_help_text_dict.get("tickets_page_size", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_cola_page_size, self._cfg_help_text_dict.get("cola_page_size", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_inventario_page_size, self._cfg_help_text_dict.get("inventario_page_size", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_reportes_page_size, self._cfg_help_text_dict.get("reportes_page_size", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_escaner_srv, self._cfg_help_text_dict.get("escaner_srv_page_size", "")),
+            self._crear_control_config_con_ayuda(self._cfg_dd_escaner_hist, self._cfg_help_text_dict.get("escaner_hist_page_size", "")),
+            Container(height=12),
+        ], spacing=6, scroll=ScrollMode.AUTO)
+    
+    def _construir_tab_avanzado(self) -> Column:
+        """Construye el tab de opciones avanzadas y diagnóstico."""
         self._cfg_sw_diagnostico = Switch(
             label="Diagnóstico rápido",
             value=bool(self._prefs.get("features", {}).get("diagnostico_rapido", True)),
-            on_change=self._guardar_preferencias_locales,
+            on_change=self._on_config_change_tracked,
         )
         self._cfg_txt_contacto = TextField(
             label="Contacto de soporte",
             value=str(self._prefs.get("support", {}).get("email", "")),
             hint_text="correo@empresa.com",
-            on_blur=self._guardar_preferencias_locales,
+            on_blur=self._on_config_change_tracked,
         )
         self._cfg_txt_mensaje = TextField(
-            label="Sugerencia o reporte",
+            label="Sugerencia o reporte de problema",
             multiline=True,
             min_lines=3,
             max_lines=5,
             hint_text="Describe mejora, problema o solicitud",
         )
+        
+        return Column([
+            Text("⚙️ Opciones Avanzadas", size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+            Container(height=4),
+            self._crear_control_config_con_ayuda(self._cfg_sw_diagnostico, self._cfg_help_text_dict.get("diagnostico_rapido", "")),
+            Container(height=12),
+            Text("📧 Enviar Reporte de Soporte", size=14, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+            Container(height=4),
+            self._crear_control_config_con_ayuda(self._cfg_txt_contacto, "Tu email para que el equipo de soporte te contacte"),
+            self._crear_control_config_con_ayuda(self._cfg_txt_mensaje, ""),
+            ft.Button(
+                "📧 Enviar reporte",
+                icon=icons.SEND,
+                on_click=self._enviar_reporte_soporte,
+                width=200,
+            ),
+            Container(height=12),
+        ], spacing=6, scroll=ScrollMode.AUTO)
+
+
+    def _vista_configuracion_app(self) -> Column:
+        licencia = read_license_status()
+
+        # Búsqueda/filtro mejorada
+        self._cfg_txt_search = TextField(
+            label="🔍 Buscar opciones...",
+            hint_text="Escribe para filtrar las opciones",
+            on_change=lambda e: self._actualizar_etiqueta_cambios(),
+            prefix_icon=icons.SEARCH,
+            border_radius=12,
+        )
+
+        # Indicador de cambios mejorado
+        self._cfg_lbl_cambios = Container(
+            content=Row([
+                Icon(icons.WARNING, color="#FFB74D", size=20),
+                Text("⚠️  CAMBIOS SIN GUARDAR", color="#FFB74D", weight=FontWeight.BOLD, size=12),
+            ], spacing=10, vertical_alignment=CrossAxisAlignment.CENTER),
+            bgcolor="#2a2a2a",
+            border_radius=12,
+            padding=12,
+            border="2px #FFB74D",
+            visible=False,
+        )
+
+        # Estado de licencia mejorado
+        estado_licencia = Container(
+            content=Row([
+                Icon(icons.VERIFIED_USER, size=20, color="#4CAF50"),
+                Column([
+                    Text(f"v{get_app_version()}", size=11, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                    Text(f"Estado: {licencia.get('last_reason', 'OK')}", size=10, color=COLOR_TEXTO_SEC),
+                ], spacing=1, expand=True),
+                ft.Button(
+                    "Verificar",
+                    icon=icons.VERIFIED_USER,
+                    on_click=self._verificar_licencia_desde_config,
+                    width=100,
+                    height=36,
+                )
+            ], spacing=12, vertical_alignment=CrossAxisAlignment.CENTER),
+            bgcolor=COLOR_SUPERFICIE,
+            border_radius=12,
+            padding=12,
+            margin=ft.Margin.only(bottom=12),
+        )
+
+        # Botones de acción: una sola banda centrada para evitar desalineaciones.
+        barra_acciones = Container(
+            content=Row(
+                controls=[
+                    ft.OutlinedButton(
+                        "Restaurar",
+                        icon=icons.RESTART_ALT,
+                        on_click=self._restaurar_preferencias_recomendadas,
+                        width=160,
+                    ),
+                    ft.OutlinedButton(
+                        "Descartar",
+                        icon=icons.CLOSE,
+                        on_click=self._descartar_cambios_config,
+                        width=140,
+                    ),
+                    ft.OutlinedButton(
+                        "Aplicar",
+                        icon=icons.CHECK_CIRCLE,
+                        on_click=self._aplicar_cambios_sin_guardar,
+                        width=140,
+                    ),
+                    ft.Button(
+                        "Guardar",
+                        icon=icons.SAVE,
+                        on_click=self._guardar_cambios_config,
+                        width=140,
+                    ),
+                ],
+                spacing=12,
+                run_spacing=10,
+                alignment=MainAxisAlignment.CENTER,
+                wrap=True,
+            ),
+        )
 
         return Column(
             controls=[
                 Container(
-                    content=Text("⚙️ Configuración, Licencia y Soporte", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                    padding=ft.Padding.only(bottom=15),
-                ),
-                Container(
                     content=Column([
-                        Text("Producto", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                        Text(f"Versión: {get_app_version()}", size=12, color=COLOR_TEXTO_SEC),
-                        Text(f"Servidor licencias: {licencia.get('server_url', 'N/D')}", size=12, color=COLOR_TEXTO_SEC),
-                        Text(f"Última razón: {licencia.get('last_reason', 'N/D')}", size=12, color=COLOR_TEXTO_SEC),
-                        Container(height=8),
-                        ft.ElevatedButton(
-                            "Verificar licencia ahora",
-                            icon=icons.VERIFIED_USER,
-                            on_click=self._verificar_licencia_desde_config,
-                        ),
-                    ], spacing=6),
-                    bgcolor=COLOR_SUPERFICIE,
-                    border_radius=12,
-                    padding=16,
+                        Text("⚙️ CONFIGURACIÓN", size=26, weight=FontWeight.BOLD, color="#FF6B6B"),
+                        Text("Personaliza Kubo según tus preferencias", size=12, color=COLOR_TEXTO_SEC, weight=FontWeight.W_400),
+                    ], spacing=4),
+                    padding=ft.Padding.only(bottom=12, top=4),
                 ),
+                estado_licencia,
+                self._cfg_txt_search,
+                self._cfg_lbl_cambios,
+                Container(height=4),
+                # Tab 1: Interfaz
+                self._crear_card_seccion_elegante(icons.PALETTE, "Interfaz y Apariencia", 
+                    [self._crear_control_config_con_ayuda(c, h) for c, h in [
+                        (self._construir_tab_interfaz(), ""),
+                    ]], "#FF6B6B"),
                 Container(height=12),
-                Container(
-                    content=Column([
-                        Text("Preferencias", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                        self._cfg_sw_notificaciones,
-                        self._cfg_sw_animaciones,
-                        self._cfg_sw_diagnostico,
-                    ], spacing=6),
-                    bgcolor=COLOR_SUPERFICIE,
-                    border_radius=12,
-                    padding=16,
-                ),
+                # Tab 2: Chat
+                self._crear_card_seccion_elegante(icons.CHAT, "Chat Inteligente",
+                    [self._crear_control_config_con_ayuda(c, h) for c, h in [
+                        (self._construir_tab_chat(), ""),
+                    ]], "#4ECDC4"),
                 Container(height=12),
-                Container(
-                    content=Column([
-                        Text("Soporte y sugerencias", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                        self._cfg_txt_contacto,
-                        self._cfg_txt_mensaje,
-                        ft.ElevatedButton(
-                            "Enviar reporte",
-                            icon=icons.SEND,
-                            on_click=self._enviar_reporte_soporte,
-                        ),
-                    ], spacing=8),
-                    bgcolor=COLOR_SUPERFICIE,
-                    border_radius=12,
-                    padding=16,
-                ),
+                # Tab 3: Paneles
+                self._crear_card_seccion_elegante(icons.VIEW_LIST, "Paneles y Tablas",
+                    [self._crear_control_config_con_ayuda(c, h) for c, h in [
+                        (self._construir_tab_paneles(), ""),
+                    ]], "#45B7D1"),
+                Container(height=12),
+                # Tab 4: Avanzado
+                self._crear_card_seccion_elegante(icons.ENGINEERING, "Opciones Avanzadas",
+                    [self._crear_control_config_con_ayuda(c, h) for c, h in [
+                        (self._construir_tab_avanzado(), ""),
+                    ]], "#F39C12"),
+                Container(height=16),
+                barra_acciones,
                 Container(height=20),
             ],
             scroll=ScrollMode.AUTO,
             expand=True,
         )
+
 
     def _registrar_tiempo_vista(self, indice: int, duracion_ms: float, cache_hit: bool) -> None:
         nombre = self._nombre_vista(indice)
@@ -841,6 +2140,21 @@ class PanelAdminIT:
         tasa_resolucion = (resueltos_hoy / tickets_hoy * 100) if tickets_hoy > 0 else 0
         tasa_cumplimiento_sla = self._calcular_cumplimiento_sla(todos_tickets)
         tickets_en_espera = len(todos_tickets[todos_tickets.get("ESTADO") == "En Espera"]) if not todos_tickets.empty else 0
+        tickets_activos_total = 0
+        criticos_abiertos = 0
+
+        if not todos_tickets.empty:
+            estados_activos = {"Abierto", "En Cola", "En Proceso", "En Espera"}
+            serie_estado = todos_tickets["ESTADO"].fillna("").astype(str) if "ESTADO" in todos_tickets.columns else pd.Series(dtype=str)
+            mascara_activos = serie_estado.isin(estados_activos)
+            tickets_activos_total = int(mascara_activos.sum())
+
+            if "PRIORIDAD" in todos_tickets.columns:
+                serie_prioridad = todos_tickets["PRIORIDAD"].fillna("").astype(str)
+                criticos_abiertos = int((mascara_activos & (serie_prioridad == "Crítica")).sum())
+
+        pct_activos_total = (tickets_activos_total / len(todos_tickets) * 100) if not todos_tickets.empty else 0
+        pct_criticos_abiertos = (criticos_abiertos / tickets_activos_total * 100) if tickets_activos_total > 0 else 0
 
         try:
             from datetime import timedelta
@@ -875,14 +2189,16 @@ class PanelAdminIT:
                             self._kpi_card_v2("En Resolución", str(len(cola)), icons.PENDING_ACTIONS, COLOR_PRIMARIO, "↑" if len(cola) > 3 else "↓"),
                             self._kpi_card_v2("Resueltos Hoy", str(resueltos_hoy), icons.CHECK_CIRCLE, COLOR_EXITO, f"+{resueltos_hoy}"),
                             self._kpi_card_v2("Tasa Resolución", f"{tasa_resolucion:.0f}%", icons.TRENDING_UP, COLOR_DISPONIBLE, "↑" if tasa_resolucion > 70 else "↓"),
-                        ], spacing=15, wrap=True),
-                        Row([
                             self._kpi_card_v2("Cumplimiento SLA", f"{tasa_cumplimiento_sla:.0f}%", icons.VERIFIED_USER, COLOR_EXITO if tasa_cumplimiento_sla > 90 else COLOR_ADVERTENCIA, "✓" if tasa_cumplimiento_sla > 90 else "⚠"),
+                        ], spacing=10, wrap=True, run_spacing=10, alignment=MainAxisAlignment.SPACE_BETWEEN, run_alignment=MainAxisAlignment.START),
+                        Row([
                             self._kpi_card_v2("En Espera", str(tickets_en_espera), icons.SCHEDULE, COLOR_ADVERTENCIA, "⏱"),
                             self._kpi_card_v2("Técnicos Disponibles", f"{tecnicos_disponibles}/{total_tecnicos}", icons.ENGINEERING, COLOR_DISPONIBLE, "✓" if tecnicos_disponibles >= total_tecnicos * 0.5 else "✗"),
                             self._kpi_card_v2("Tiempo Prom.", f"{stats['tiempo_promedio_cierre']:.1f}h", icons.TIMER, COLOR_ACENTO, "•"),
-                        ], spacing=15, wrap=True),
-                    ], spacing=12),
+                            self._kpi_card_v2("Tickets Activos", str(tickets_activos_total), icons.FIBER_NEW, COLOR_INFO, f"{pct_activos_total:.0f}%"),
+                            self._kpi_card_v2("Críticos Abiertos", str(criticos_abiertos), icons.WARNING, COLOR_ERROR if criticos_abiertos > 0 else COLOR_EXITO, f"{pct_criticos_abiertos:.0f}%"),
+                        ], spacing=10, wrap=True, run_spacing=10, alignment=MainAxisAlignment.SPACE_BETWEEN, run_alignment=MainAxisAlignment.START),
+                    ], spacing=12, horizontal_alignment=CrossAxisAlignment.STRETCH),
                     padding=20,
                     bgcolor=COLOR_SUPERFICIE,
                     border_radius=15,
@@ -1217,23 +2533,24 @@ class PanelAdminIT:
         return Container(
             content=Column([
                 Row([
-                    Icon(icono, color=color, size=32),
+                    Icon(icono, color=color, size=26),
                     Container(
-                        content=Text(indicador, size=14, weight=FontWeight.BOLD, color=colors.WHITE),
+                        content=Text(indicador, size=11, weight=FontWeight.BOLD, color=colors.WHITE),
                         bgcolor=color_indicador,
-                        padding=ft.Padding.symmetric(horizontal=8, vertical=4),
-                        border_radius=ft.BorderRadius.all(6)
+                        padding=ft.Padding.symmetric(horizontal=5, vertical=2),
+                        border_radius=ft.BorderRadius.all(4)
                     )
-                ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-                Container(height=12),
-                Text(valor, size=32, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                Text(titulo, size=12, color=COLOR_TEXTO_SEC)
-            ], spacing=4),
+                ], alignment=MainAxisAlignment.SPACE_BETWEEN, tight=True),
+                Container(height=8),
+                Text(valor, size=26, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                Container(height=2),
+                Text(titulo, size=10, color=COLOR_TEXTO_SEC)
+            ], spacing=2),
             bgcolor=COLOR_SUPERFICIE,
-            border_radius=ft.BorderRadius.all(12),
-            padding=16,
-            width=170,
-            height=160,
+            border_radius=ft.BorderRadius.all(11),
+            padding=12,
+            width=175,
+            height=145,
             border=ft.Border.all(1, COLOR_SUPERFICIE_3)
         )
     
@@ -2094,37 +3411,59 @@ class PanelAdminIT:
         for _, tec in tecnicos.iterrows():
             tarjetas.append(self._tarjeta_tecnico(tec))
         
-        return Column([
-            Row([
-                Text("👨‍💻 Gestión de Técnicos", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                Row([
-                    ft.Button(
-                        "Agregar Técnico",
-                        icon=icons.PERSON_ADD,
-                        bgcolor=COLOR_EXITO,
-                        color=colors.WHITE,
-                        on_click=lambda e: self._mostrar_dialogo_agregar_tecnico()
-                    ),
-                    ft.Button(
-                        "Actualizar",
-                        icon=icons.REFRESH,
-                        bgcolor=COLOR_PRIMARIO,
-                        color=colors.WHITE,
-                        on_click=lambda e: self._refrescar_vista()
-                    )
-                ], spacing=10)
-            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-            Container(height=20),
-            Row(tarjetas, spacing=20, wrap=True) if tarjetas else Container(
+        contenido_vista = Column([
+            # Encabezado elegante
+            self._crear_encabezado_seccion("👨‍💻", "Gestión de Técnicos", 
+                                          f"Total: {len(tecnicos)} técnicos registrados"),
+            
+            # Tarjeta de acciones
+            Card(
+                content=Container(
+                    content=Row([
+                        ft.ElevatedButton(
+                            "Agregar Técnico",
+                            icon=icons.PERSON_ADD,
+                            on_click=lambda e: self._mostrar_dialogo_agregar_tecnico(),
+                        ),
+                        ft.ElevatedButton(
+                            "Actualizar",
+                            icon=icons.REFRESH,
+                            on_click=lambda e: self._refrescar_vista(),
+                        )
+                    ], spacing=12, run_spacing=10, wrap=True),
+                    padding=12,
+                ),
+                elevation=2,
+            ),
+            
+            Container(height=16),
+            
+            Row(tarjetas, spacing=16, wrap=True) if tarjetas else Container(
                 content=Column([
                     Icon(icons.PERSON_OFF, size=60, color=COLOR_TEXTO_SEC),
                     Text("No hay técnicos registrados", size=18, color=COLOR_TEXTO_SEC),
-                    Text("Agrega un técnico para comenzar", color=COLOR_TEXTO_SEC)
+                    Text("Agrega un técnico para comenzar", color=COLOR_TEXTO_SEC),
+                    Container(height=12),
+                    ft.ElevatedButton(
+                        "Crear primer técnico",
+                        icon=icons.PERSON_ADD,
+                        on_click=lambda e: self._mostrar_dialogo_agregar_tecnico(),
+                    )
                 ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=10),
                 padding=50,
                 alignment=ft.Alignment(0, 0)
             )
         ], scroll=ScrollMode.AUTO, expand=True)
+        return Column(
+            controls=[
+                Container(
+                    content=contenido_vista,
+                    padding=ft.Padding.symmetric(horizontal=2, vertical=0),
+                )
+            ],
+            scroll=ScrollMode.AUTO,
+            expand=True,
+        )
     
     def _mostrar_dialogo_agregar_tecnico(self):
         """Muestra diálogo para agregar un nuevo técnico - Versión mejorada."""
@@ -2366,7 +3705,7 @@ class PanelAdminIT:
                 content=Column([
                     Container(
                         content=Icon(icons.WARNING_AMBER_ROUNDED, size=60, color=COLOR_ADVERTENCIA),
-                        alignment=ft.Alignment.CENTER,
+                        alignment=ft.Alignment(0, 0),
                         animate_opacity=300
                     ),
                     Container(height=10),
@@ -2377,7 +3716,7 @@ class PanelAdminIT:
                         padding=10,
                         bgcolor=COLOR_SUPERFICIE_2,
                         border_radius=8,
-                        alignment=ft.Alignment.CENTER
+                        alignment=ft.Alignment(0, 0)
                     ),
                     Container(height=5),
                     Row([
@@ -2451,6 +3790,9 @@ class PanelAdminIT:
             nonlocal dialogo
             if dialogo:
                 dialogo.open = False
+                self._chat_detalle_ticket_id = None
+                self._chat_detalle_list_ref = None
+                self._chat_detalle_txt_ref = None
                 self.page.update()
         
         def asignar(e):
@@ -2458,7 +3800,12 @@ class PanelAdminIT:
                 cerrar_dialogo()
                 self._mostrar_carga("Asignando ticket...")
                 
-                self.gestor.asignar_ticket_a_tecnico(dd_tickets.value, id_tecnico)
+                self.gestor.asignar_ticket_a_tecnico(
+                    dd_tickets.value,
+                    id_tecnico,
+                    usuario_op=self._usuario_operador(),
+                    origen="kubo.manual",
+                )
                 
                 self._ocultar_carga()
                 self._mostrar_exito(
@@ -2602,79 +3949,61 @@ class PanelAdminIT:
         self._tickets_criticas_text = Text("⚠ 0 críticas", size=12, color=colors.WHITE)
         self._tickets_altas_text = Text("🔴 0 altas", size=12, color=colors.WHITE)
         
-        vista = Column([
-            Row([
-                Text("📋 Gestión de Tickets Activos", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                Row([
-                    Container(
-                        content=self._tickets_total_text,
-                        bgcolor=COLOR_INFO,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
-                        border_radius=ft.BorderRadius.all(10)
-                    ),
-                    Container(
-                        content=self._tickets_criticas_text,
-                        bgcolor=COLOR_CRITICA,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
-                        border_radius=ft.BorderRadius.all(10)
-                    ),
-                    Container(
-                        content=self._tickets_altas_text,
-                        bgcolor=COLOR_ALTA,
-                        padding=ft.Padding.symmetric(horizontal=10, vertical=5),
-                        border_radius=ft.BorderRadius.all(10)
-                    ),
+        contenido_vista = Column([
+            # Encabezado elegante
+            self._crear_encabezado_seccion("📋", "Gestión de Tickets Activos", 
+                                          "Tickets ordenados por urgencia • Críticas y Altas prioritarias"),
+            
+            # Tarjeta de resumen/stats
+            Container(
+                content=Row([
+                    self._crear_card_resumen("Total Activos", self._tickets_total_text.value, icons.DONE_ALL, COLOR_INFO),
+                    self._crear_card_resumen("Críticas", "0", icons.ERROR, COLOR_CRITICA),
+                    self._crear_card_resumen("Altas", "0", icons.WARNING, COLOR_ALTA),
                     ft.Button(
                         "Actualizar",
                         icon=icons.REFRESH,
                         bgcolor=COLOR_PRIMARIO,
                         color=colors.WHITE,
-                        on_click=lambda e: self._cargar_tickets_async(forzar=True)
+                        on_click=lambda e: self._cargar_tickets_async(forzar=True),
+                        width=150,
                     )
-                ], spacing=10)
-            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-            
-            Container(height=10),
-            
-            # Mensaje informativo
-            Container(
-                content=Row([
-                    Icon(icons.INFO, color=COLOR_INFO, size=16),
-                    Text(
-                        "Tickets ordenados por urgencia. Críticas y Altas aparecen primero.",
-                        color=COLOR_TEXTO_SEC, size=12
-                    )
-                ], spacing=10),
-                bgcolor=COLOR_SUPERFICIE,
-                padding=10,
-                border_radius=ft.BorderRadius.all(8)
+                ], spacing=12, run_spacing=12, alignment=MainAxisAlignment.START, vertical_alignment=CrossAxisAlignment.CENTER, wrap=True),
             ),
             
-            Container(height=10),
+            Container(height=12),
             
-            # Barra de filtros (con prioridad)
-            Container(
-                content=Row([
+            # Tarjeta de filtros elegante
+            self._crear_card_filtros([
+                Row([
                     self.filtro_prioridad,
                     self.filtro_estado,
                     self.filtro_categoria,
                     self.txt_busqueda
-                ], spacing=15),
-                bgcolor=COLOR_SUPERFICIE,
-                padding=15,
-                border_radius=ft.BorderRadius.all(10)
-            ),
+                ], spacing=12, run_spacing=12, wrap=True)
+            ], "#FF9800"),
             
-            Container(height=15),
+            Container(height=16),
             
             # Tabla de tickets (contenedor dinámico con scroll)
             self._tickets_tabla_container,
             self._tickets_paginacion,
             self._tickets_resumen_text,
-        ], expand=True, scroll=ScrollMode.AUTO)
+        ], expand=True, scroll=ScrollMode.AUTO, horizontal_alignment=CrossAxisAlignment.STRETCH)
 
         self._cargar_tickets_async()
-        return vista
+        return Column(
+            controls=[
+                Container(
+                    content=contenido_vista,
+                    padding=ft.Padding.symmetric(horizontal=2, vertical=0),
+                    expand=True,
+                )
+            ],
+            scroll=ScrollMode.AUTO,
+            expand=True,
+            horizontal_alignment=CrossAxisAlignment.STRETCH,
+        )
     
     def _construir_tabla_tickets(self, df: pd.DataFrame) -> DataTable:
         """Construye la tabla de tickets."""
@@ -2862,11 +4191,29 @@ class PanelAdminIT:
         fin = min(inicio + self._tickets_page_size, total)
         slice_df = self._tickets_df_filtrado.iloc[inicio:fin]
 
+        ancho_tickets = max(
+            1100,
+            int(getattr(self.page, "window_width", 0) or getattr(self.page, "width", 0) or 0) - 24,
+        )
+
         self.tabla_tickets = self._construir_tabla_tickets(slice_df)
         if self._tickets_tabla_container is not None:
             self._tickets_tabla_container.content = Column(
-                controls=[Row(controls=[self.tabla_tickets], scroll=ScrollMode.AUTO)],
+                controls=[
+                    Container(
+                        content=Row(
+                            controls=[Container(content=self.tabla_tickets, width=ancho_tickets)],
+                            scroll=ScrollMode.AUTO,
+                            expand=True,
+                            vertical_alignment=CrossAxisAlignment.START,
+                        ),
+                        width=ancho_tickets,
+                        expand=True,
+                    )
+                ],
                 scroll=ScrollMode.AUTO,
+                expand=True,
+                horizontal_alignment=CrossAxisAlignment.STRETCH,
             )
 
         if self._tickets_btn_prev is not None:
@@ -2905,10 +4252,10 @@ class PanelAdminIT:
                 spacing=10,
                 alignment=MainAxisAlignment.CENTER,
             ),
-            padding=30,
-            alignment=ft.Alignment(0, 0),
+            padding=12,
             bgcolor=COLOR_SUPERFICIE,
             border_radius=ft.BorderRadius.all(10),
+            expand=True,
         )
         self._cola_btn_prev = ft.IconButton(icon=icons.CHEVRON_LEFT, disabled=True, on_click=lambda e: self._cola_cambiar_pagina(-1))
         self._cola_btn_next = ft.IconButton(icon=icons.CHEVRON_RIGHT, disabled=True, on_click=lambda e: self._cola_cambiar_pagina(1))
@@ -2920,43 +4267,51 @@ class PanelAdminIT:
         )
         self._cola_resumen_text = Text("", size=11, color=COLOR_TEXTO_SEC, visible=False)
 
-        vista = Column([
-            Row([
-                Text("🎫 Cola de Tickets", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                Container(
-                    content=Row([
-                        self._cola_badge_icon,
-                        self._cola_badge_text,
-                    ], spacing=10),
-                    bgcolor=COLOR_SUPERFICIE,
-                    padding=ft.Padding.symmetric(horizontal=15, vertical=8),
-                    border_radius=ft.BorderRadius.all(20)
-                )
-            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+        contenido_vista = Column([
+            # Encabezado elegante
+            self._crear_encabezado_seccion("🎫", "Cola de Tickets", 
+                                          "Tickets en espera de asignación • Gestión de rebotes"),
             
-            Container(height=20),
-            
-            # Mensaje de estado
-            Container(
-                content=Row([
-                    Icon(icons.INFO, color=COLOR_ACENTO),
-                    self._cola_estado_text,
-                ], spacing=15),
-                bgcolor=COLOR_SUPERFICIE,
-                padding=20,
-                border_radius=ft.BorderRadius.all(10)
+            # Tarjeta de estado con técnicos
+            Card(
+                content=Container(
+                    content=Column([
+                        Row([
+                            Icon(icons.SCHEDULE, size=28, color="#4ECDC4"),
+                            Text("Estado de Cola", size=13, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
+                        ], spacing=10, vertical_alignment=CrossAxisAlignment.CENTER),
+                        self._cola_estado_text,
+                        Row([
+                            self._cola_badge_icon,
+                            self._cola_badge_text,
+                        ], spacing=8, vertical_alignment=CrossAxisAlignment.CENTER),
+                    ], spacing=8),
+                    padding=16,
+                ),
+                elevation=2,
             ),
             
-            Container(height=20),
+            Container(height=16),
             
             self._cola_paginacion,
             # Lista de cola
             self._cola_lista_container,
             self._cola_resumen_text,
-        ], expand=True, scroll=ScrollMode.AUTO)
+        ], expand=True, scroll=ScrollMode.AUTO, horizontal_alignment=CrossAxisAlignment.STRETCH)
 
         self._cargar_cola_async()
-        return vista
+        return Column(
+            controls=[
+                Container(
+                    content=contenido_vista,
+                    padding=ft.Padding.symmetric(horizontal=2, vertical=0),
+                    expand=True,
+                )
+            ],
+            scroll=ScrollMode.AUTO,
+            expand=True,
+            horizontal_alignment=CrossAxisAlignment.STRETCH,
+        )
 
     def _cargar_cola_async(self):
         if self._cola_cargando:
@@ -3033,10 +4388,10 @@ class PanelAdminIT:
             for pos, (_, ticket) in enumerate(cola_slice.iterrows(), 1)
         ]
 
-        self._cola_lista_container.content = Container(
-            content=Column(items_cola, spacing=8, scroll=ScrollMode.AUTO),
-            height=420,
-            padding=0,
+        self._cola_lista_container.content = Column(
+            items_cola,
+            spacing=8,
+            tight=True,
         )
 
         self._cola_btn_prev.disabled = self._cola_page <= 0
@@ -3134,7 +4489,12 @@ class PanelAdminIT:
             id_tecnico = str(disponibles.iloc[0]["ID_TECNICO"])
             nombre_tecnico = str(disponibles.iloc[0].get("NOMBRE", id_tecnico))
 
-            asignado = self.gestor.asignar_ticket_a_tecnico(id_ticket, id_tecnico)
+            asignado = self.gestor.asignar_ticket_a_tecnico(
+                id_ticket,
+                id_tecnico,
+                usuario_op=self._usuario_operador(),
+                origen="kubo.cola",
+            )
             if not asignado:
                 self._ocultar_carga()
                 self._mostrar_snackbar("No se pudo asignar el ticket. Intenta actualizar la cola.", COLOR_ERROR)
@@ -3756,80 +5116,69 @@ class PanelAdminIT:
 
         panel_auditoria = self._construir_panel_auditoria(todos)
 
-        return Column([
-            # ── Header ────────────────────────────────────────────────
-            Row([
-                Text("📚 Historial y Auditoría", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                Container(
-                    content=Row([
-                        Icon(icons.LOCK, color=COLOR_TEXTO_SEC, size=16),
-                        Text(f"{len(historial_completo)} tickets cerrados", color=COLOR_TEXTO_SEC)
-                    ], spacing=5),
-                    bgcolor=COLOR_SUPERFICIE,
-                    padding=ft.Padding.symmetric(horizontal=15, vertical=8),
-                    border_radius=20
-                )
-            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-
-            Container(height=10),
-
-            # ── Panel auditoría ────────────────────────────────────────
+        contenido_vista = Column([
+            # Encabezado elegante
+            self._crear_encabezado_seccion("📚", "Historial y Auditoría", 
+                                          f"{len(historial_completo)} tickets cerrados • Solo lectura"),
+            
+            # Panel de auditoría
             panel_auditoria,
+            
+            Container(height=16),
 
-            Container(height=15),
+            # Tarjeta de filtros mejorada
+            self._crear_card_filtros([
+                Row([
+                    dd_categoria,
+                    dd_tecnico,
+                    txt_buscar,
+                    txt_fecha_desde,
+                    txt_fecha_hasta,
+                ], spacing=12, wrap=True),
+                Container(height=8),
+                Row([
+                    ft.ElevatedButton("🔍 Aplicar", icon=icons.SEARCH, on_click=aplicar_filtros),
+                    ft.OutlinedButton("↺ Limpiar", icon=icons.CLEAR_ALL, on_click=limpiar_filtros),
+                    Container(expand=True),
+                    lbl_resultados,
+                ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER, expand=True)
+            ], "#2196F3"),
 
-            # ── Filtros ────────────────────────────────────────────────
-            Container(
-                content=Column([
-                    Row([
-                        Icon(icons.FILTER_LIST, size=18, color=COLOR_ACENTO),
-                        Text("Filtros", size=13, weight=FontWeight.BOLD, color=COLOR_ACENTO)
-                    ], spacing=8),
-                    Row([
-                        dd_categoria,
-                        dd_tecnico,
-                        txt_buscar,
-                        txt_fecha_desde,
-                        txt_fecha_hasta,
-                        ft.IconButton(
-                            icon=icons.SEARCH, bgcolor=COLOR_PRIMARIO,
-                            icon_color=colors.WHITE, tooltip="Aplicar filtros",
-                            on_click=aplicar_filtros
-                        ),
-                        ft.IconButton(
-                            icon=icons.CLEAR_ALL, bgcolor=COLOR_SUPERFICIE_2,
-                            icon_color=COLOR_TEXTO_SEC, tooltip="Limpiar filtros",
-                            on_click=limpiar_filtros
-                        ),
-                        lbl_resultados
-                    ], spacing=10, wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER)
-                ], spacing=10),
-                bgcolor=COLOR_SUPERFICIE,
-                border_radius=10,
-                padding=16,
-                border=ft.Border.all(1, COLOR_SUPERFICIE_2)
+            Container(height=16),
+
+            # Aviso readonly mejorado
+            Card(
+                content=Container(
+                    content=Row([
+                        Icon(icons.LOCK, color="#F39C12", size=24),
+                        Column([
+                            Text("Archive de Lectura Protegida", size=12, weight=FontWeight.BOLD, color=COLOR_TEXTO),
+                            Text("Los tickets cerrados no pueden editarse. Solo lectura.", color=COLOR_TEXTO_SEC, size=11),
+                        ], spacing=2, expand=True),
+                    ], spacing=12, vertical_alignment=CrossAxisAlignment.CENTER),
+                    padding=12,
+                ),
+                elevation=2,
             ),
 
-            Container(height=12),
+            Container(height=16),
 
-            # ── Aviso readonly ─────────────────────────────────────────
-            Container(
-                content=Row([
-                    Icon(icons.INFO, color=COLOR_INFO),
-                    Text("Los tickets cerrados no pueden editarse. Solo lectura.",
-                         color=COLOR_TEXTO_SEC, size=12)
-                ], spacing=12),
-                bgcolor=COLOR_SUPERFICIE,
-                padding=12,
-                border_radius=8
-            ),
-
-            Container(height=12),
-
-            # ── Tabla dinámica ─────────────────────────────────────────
+            # Tabla dinámica
             self._hist_tabla_container,
 
-        ], scroll=ScrollMode.AUTO, expand=True)
+        ], scroll=ScrollMode.AUTO, expand=True, horizontal_alignment=CrossAxisAlignment.STRETCH)
+        return Column(
+            controls=[
+                Container(
+                    content=contenido_vista,
+                    padding=ft.Padding.symmetric(horizontal=2, vertical=0),
+                    expand=True,
+                )
+            ],
+            scroll=ScrollMode.AUTO,
+            expand=True,
+            horizontal_alignment=CrossAxisAlignment.STRETCH,
+        )
 
     def _construir_tabla_historial(self, historial: pd.DataFrame) -> ft.Control:
         """Construye la tabla del historial con los datos proporcionados."""
@@ -3841,6 +5190,11 @@ class PanelAdminIT:
                 ], horizontal_alignment=CrossAxisAlignment.CENTER, spacing=10),
                 padding=40, alignment=ft.Alignment(0, 0)
             )
+
+        ancho_historial = max(
+            1100,
+            int(getattr(self.page, "window_width", 0) or getattr(self.page, "width", 0) or 0) - 24,
+        )
 
         filas = []
         for _, row in historial.iterrows():
@@ -3892,11 +5246,27 @@ class PanelAdminIT:
             border_radius=10,
             heading_row_color=COLOR_SUPERFICIE_2,
             show_checkbox_column=False,
-            column_spacing=18
+            column_spacing=18,
+            expand=True
         )
-        return Column(
-            controls=[Row(controls=[tabla], scroll=ScrollMode.AUTO)],
-            scroll=ScrollMode.AUTO,
+        return Container(
+            content=Column(
+                controls=[
+                    Container(
+                        content=Row(
+                            controls=[Container(content=tabla, width=ancho_historial)],
+                            scroll=ScrollMode.AUTO,
+                            expand=True,
+                            vertical_alignment=CrossAxisAlignment.START,
+                        ),
+                        width=ancho_historial,
+                        expand=True,
+                    ),
+                ],
+                expand=True,
+                horizontal_alignment=CrossAxisAlignment.STRETCH,
+            ),
+            expand=True,
         )
 
     def _construir_panel_auditoria(self, tickets: pd.DataFrame) -> Container:
@@ -4305,7 +5675,7 @@ class PanelAdminIT:
             self._boton_tab_reporte("Rendimiento", icons.SPEED, 2, cambiar_tab_reportes),
             self._boton_tab_reporte("Tendencias", icons.TRENDING_UP, 3, cambiar_tab_reportes),
             self._boton_tab_reporte("Equipos", icons.COMPUTER, 4, cambiar_tab_reportes),
-        ], spacing=5)
+        ], spacing=5, run_spacing=8, wrap=True)
         
         # Contenido según tab seleccionado
         contenidos_tabs = [
@@ -4318,36 +5688,40 @@ class PanelAdminIT:
         
         contenido_actual = contenidos_tabs[self._tab_reportes_actual]()
         
-        return Column([
-            # Header con título y botones de acción
-            Row([
-                Text("📊 Centro de Análisis y Reportes", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                Row([
-                    ft.Button(
-                        "Exportar Excel",
-                        icon=icons.DOWNLOAD,
-                        bgcolor=COLOR_EXITO,
-                        color=colors.WHITE,
-                        on_click=lambda e: self._exportar_reporte_excel()
-                    ),
-                    ft.Button(
-                        "Actualizar",
-                        icon=icons.REFRESH,
-                        bgcolor=COLOR_PRIMARIO,
-                        color=colors.WHITE,
-                        on_click=lambda e: self._refrescar_vista()
-                    )
-                ], spacing=10)
-            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+        contenido_vista = Column([
+            # Encabezado elegante
+            self._crear_encabezado_seccion("📊", "Centro de Análisis y Reportes", 
+                                          "Visualización de datos y tendencias en tiempo real"),
             
-            Container(height=15),
+            # Tarjeta de acciones mejorada
+            Card(
+                content=Container(
+                    content=Row([
+                        ft.ElevatedButton(
+                            "Exportar Excel",
+                            icon=icons.DOWNLOAD,
+                            on_click=lambda e: self._exportar_reporte_excel(),
+                        ),
+                        ft.ElevatedButton(
+                            "Actualizar",
+                            icon=icons.REFRESH,
+                            on_click=lambda e: self._refrescar_vista(),
+                        ),
+                    ], spacing=12, run_spacing=10, wrap=True),
+                    padding=12,
+                ),
+                elevation=2,
+            ),
+            
+            Container(height=16),
             
             # Navegación por tabs personalizada
             Container(
                 content=tabs_botones,
                 bgcolor=COLOR_SUPERFICIE,
-                border_radius=ft.BorderRadius.all(10),
-                padding=8
+                border_radius=ft.BorderRadius.all(12),
+                padding=10,
+                border=ft.Border.all(1, "#404040"),
             ),
             
             Container(height=10),
@@ -4357,7 +5731,8 @@ class PanelAdminIT:
                 content=contenido_actual,
                 expand=True
             )
-        ], expand=True)
+        ], expand=True, scroll=ScrollMode.AUTO)
+        return contenido_vista
     
     def _boton_tab_reporte(self, texto: str, icono, idx: int, on_click_fn) -> Container:
         """Crea un botón de navegación tipo tab."""
@@ -4367,10 +5742,12 @@ class PanelAdminIT:
             content=Row([
                 Icon(icono, size=16, color=colors.WHITE if es_activo else COLOR_TEXTO_SEC),
                 Text(texto, size=12, color=colors.WHITE if es_activo else COLOR_TEXTO_SEC, weight=FontWeight.BOLD if es_activo else FontWeight.NORMAL)
-            ], spacing=5),
+            ], spacing=5, tight=True),
             bgcolor=COLOR_PRIMARIO if es_activo else COLOR_SUPERFICIE_2,
+            width=150,
             padding=ft.Padding.symmetric(horizontal=15, vertical=10),
             border_radius=ft.BorderRadius.all(8),
+            alignment=ft.Alignment(-1, 0),
             on_click=lambda e, i=idx: on_click_fn(i)
         )
     
@@ -5414,6 +6791,317 @@ class PanelAdminIT:
             border_radius=ft.BorderRadius.all(15),
             border=ft.Border.all(1, color)
         )
+
+    def _chat_detalle_clave(self, mensaje: Dict[str, Any]) -> str:
+        return str(mensaje.get("client_msg_id") or mensaje.get("id") or "")
+
+    def _chat_detalle_item(self, mensaje: Dict[str, Any]) -> Container:
+        autor_tipo = str(mensaje.get("autor_tipo", "usuario"))
+        autor_id = str(mensaje.get("autor_id", ""))
+        texto = str(mensaje.get("mensaje", ""))
+        fecha = str(mensaje.get("fecha", ""))[:16]
+        color_b = COLOR_SUPERFICIE_3 if autor_tipo == "tecnico" else COLOR_SUPERFICIE_2
+        return Container(
+            content=Column([
+                Row([
+                    Text(autor_id or autor_tipo.title(), size=10, weight=FontWeight.W_600, color=COLOR_ACENTO),
+                    Text(fecha, size=9, color=COLOR_TEXTO_SEC),
+                ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                Text(texto, size=11, color=COLOR_TEXTO),
+            ], spacing=2),
+            bgcolor=color_b,
+            border_radius=8,
+            padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+        )
+
+    def _chat_detalle_render(self, mensajes: List[Dict[str, Any]], chat_list: Optional[ListView] = None) -> None:
+        lista = chat_list or self._chat_detalle_list_ref
+        if lista is None:
+            return
+
+        filas = [self._chat_detalle_item(m) for m in mensajes[-self._limite_chat_preview():]]
+        if not filas:
+            filas = [
+                Container(
+                    content=Text("Sin mensajes de chat para este ticket.", size=11, color=COLOR_TEXTO_SEC),
+                    padding=ft.Padding.all(8),
+                    bgcolor=COLOR_SUPERFICIE_2,
+                    border_radius=8,
+                )
+            ]
+
+        lista.controls = filas
+        try:
+            self.page.update()
+        except Exception:
+            pass
+
+    def _chat_detalle_actualizar(self, ticket: Dict[str, Any], chat_list: Optional[ListView] = None,
+                                 mensaje_nuevo: Optional[Dict[str, Any]] = None,
+                                 recargar: bool = False) -> None:
+        id_ticket = str(ticket.get("ID_TICKET", "") or "").strip()
+        if not id_ticket:
+            return
+
+        if mensaje_nuevo:
+            clave = self._chat_detalle_clave(mensaje_nuevo)
+            if clave:
+                reemplazado = False
+                for indice, actual in enumerate(self._chat_detalle_mensajes):
+                    if self._chat_detalle_clave(actual) == clave:
+                        self._chat_detalle_mensajes[indice] = mensaje_nuevo
+                        reemplazado = True
+                        break
+                if not reemplazado:
+                    self._chat_detalle_mensajes.append(mensaje_nuevo)
+
+        if recargar or not self._chat_detalle_mensajes or self._chat_detalle_ticket_id != id_ticket:
+            try:
+                self._chat_detalle_mensajes = self.gestor.obtener_chat_ticket(id_ticket, limite=self._limite_chat_historial(), offset=0) or []
+                if mensaje_nuevo:
+                    clave = self._chat_detalle_clave(mensaje_nuevo)
+                    if clave:
+                        reemplazado = False
+                        for indice, actual in enumerate(self._chat_detalle_mensajes):
+                            if self._chat_detalle_clave(actual) == clave:
+                                self._chat_detalle_mensajes[indice] = mensaje_nuevo
+                                reemplazado = True
+                                break
+                        if not reemplazado:
+                            self._chat_detalle_mensajes.append(mensaje_nuevo)
+            except Exception:
+                pass
+
+        self._chat_detalle_ticket_id = id_ticket
+        self._chat_detalle_render(self._chat_detalle_mensajes, chat_list)
+
+    def _chat_auto_respuesta_habilitada(self) -> bool:
+        return bool(self._prefs.get("features", {}).get("chat_auto_respuesta", True))
+
+    def _chat_autoasignacion_habilitada(self) -> bool:
+        return bool(self._prefs.get("features", {}).get("chat_autoasignacion", True))
+
+    def _chat_mensaje_auto(self, ticket: Optional[Dict[str, Any]], nombre_tecnico: str = "") -> str:
+        plantilla = str(self._prefs.get("chat", {}).get("mensaje_auto", "")).strip()
+        if not plantilla:
+            plantilla = "Recibimos tu mensaje. Un técnico te atenderá a la brevedad."
+
+        doc = ticket or {}
+        turno = str(doc.get("TURNO", "")).strip()
+        estado = str(doc.get("ESTADO", "")).strip() or "Abierto"
+        prioridad = str(doc.get("PRIORIDAD", "")).strip()
+        categoria = str(doc.get("CATEGORIA", "")).strip()
+
+        partes = [plantilla]
+        if nombre_tecnico:
+            partes.append(f"Técnico asignado: {nombre_tecnico}.")
+        elif estado in {"Abierto", "En Cola"}:
+            partes.append("Estamos priorizando tu atención.")
+
+        if prioridad in {"Crítica", "Alta"}:
+            partes.append(f"Prioridad detectada: {prioridad}.")
+        if categoria:
+            partes.append(f"Categoría: {categoria}.")
+        if turno:
+            partes.append(f"Turno: {turno}.")
+        return " ".join(p for p in partes if p).strip()
+
+    def _enviar_chat_y_broadcast(self, id_ticket: str, mensaje: str, autor_tipo: str = "tecnico", autor_id: str = "",
+                                evitar_duplicado: bool = False) -> Optional[Dict[str, Any]]:
+        if evitar_duplicado:
+            try:
+                ultimos = self.gestor.obtener_chat_ticket(id_ticket, limite=1, offset=0) or []
+                ultimo = ultimos[0] if ultimos else None
+                if ultimo:
+                    ultimo_tipo = str(ultimo.get("autor_tipo", "")).strip().lower()
+                    ultimo_id = str(ultimo.get("autor_id", "")).strip().lower()
+                    if (
+                        ultimo_tipo == str(autor_tipo or "").strip().lower()
+                        and ultimo_id == str(autor_id or self._usuario_operador()).strip().lower()
+                        and str(ultimo.get("mensaje", "")).strip() == str(mensaje or "").strip()
+                    ):
+                        return ultimo
+            except Exception:
+                pass
+
+        msg = self.gestor.agregar_mensaje_chat_ticket(
+            id_ticket=id_ticket,
+            autor_tipo=autor_tipo,
+            autor_id=autor_id or self._usuario_operador(),
+            mensaje=mensaje,
+        )
+        if not msg:
+            return None
+        try:
+            import ws_server as _ws
+            _ws.broadcast_global(_ws.EVENTO_TICKET_CHAT_MENSAJE, {"mensaje_chat": msg})
+        except Exception:
+            pass
+        return msg
+
+    def _seleccionar_tecnico_para_autoasignacion(self, disponibles: pd.DataFrame) -> tuple[str, str]:
+        """Selecciona técnico disponible con menor carga histórica."""
+        if disponibles is None or disponibles.empty:
+            return "", ""
+        try:
+            if self._modo_autoasignacion() == "primero_disponible":
+                elegido = disponibles.iloc[0]
+                id_tecnico = str(elegido.get("ID_TECNICO", "") or "").strip()
+                nombre_tecnico = str(elegido.get("NOMBRE", "") or id_tecnico).strip()
+                return id_tecnico, nombre_tecnico
+
+            df = disponibles.copy()
+            if "TICKETS_ATENDIDOS" in df.columns:
+                df["TICKETS_ATENDIDOS"] = pd.to_numeric(df["TICKETS_ATENDIDOS"], errors="coerce").fillna(0)
+            else:
+                df["TICKETS_ATENDIDOS"] = 0
+
+            if "ULTIMA_ACTIVIDAD" in df.columns:
+                df["ULTIMA_ACTIVIDAD"] = pd.to_datetime(df["ULTIMA_ACTIVIDAD"], errors="coerce")
+            else:
+                df["ULTIMA_ACTIVIDAD"] = pd.NaT
+
+            df = df.sort_values(by=["TICKETS_ATENDIDOS", "ULTIMA_ACTIVIDAD"], ascending=[True, True])
+            elegido = df.iloc[0]
+            id_tecnico = str(elegido.get("ID_TECNICO", "") or "").strip()
+            nombre_tecnico = str(elegido.get("NOMBRE", "") or id_tecnico).strip()
+            return id_tecnico, nombre_tecnico
+        except Exception:
+            elegido = disponibles.iloc[0]
+            id_tecnico = str(elegido.get("ID_TECNICO", "") or "").strip()
+            nombre_tecnico = str(elegido.get("NOMBRE", "") or id_tecnico).strip()
+            return id_tecnico, nombre_tecnico
+
+    def _chat_es_primer_mensaje_usuario(self, id_ticket: str, mensaje_chat: Optional[Dict[str, Any]] = None) -> bool:
+        """Retorna True solo cuando el ticket tiene su primer mensaje de usuario."""
+        try:
+            mensajes = self.gestor.obtener_chat_ticket(id_ticket, limite=200, offset=0) or []
+            total_usuario = 0
+            for msg in mensajes:
+                if str((msg or {}).get("autor_tipo", "")).strip().lower() == "usuario":
+                    total_usuario += 1
+
+            # Fallback defensivo: si no hay historial cargado, usa el payload recibido.
+            if total_usuario == 0 and mensaje_chat:
+                if str((mensaje_chat or {}).get("autor_tipo", "")).strip().lower() == "usuario":
+                    total_usuario = 1
+
+            return total_usuario <= 1
+        except Exception:
+            return False
+
+    def _autoasignar_por_chat_si_corresponde(self, id_ticket: str) -> tuple[bool, str]:
+        if not self._chat_autoasignacion_habilitada():
+            return False, ""
+        try:
+            ticket = self.gestor.obtener_ticket_por_id(id_ticket) or {}
+            if not ticket:
+                return False, ""
+            if str(ticket.get("ESTADO", "")) in {"Cerrado", "Cancelado"}:
+                return False, ""
+            if str(ticket.get("TECNICO_ASIGNADO", "")).strip():
+                return False, str(ticket.get("TECNICO_ASIGNADO", "")).strip()
+
+            disponibles = self.gestor.obtener_tecnicos_disponibles()
+            if disponibles is None or disponibles.empty:
+                return False, ""
+
+            id_tecnico, nombre_tecnico = self._seleccionar_tecnico_para_autoasignacion(disponibles)
+            if not id_tecnico:
+                return False, ""
+
+            ok = self.gestor.asignar_ticket_a_tecnico(
+                id_ticket,
+                id_tecnico,
+                usuario_op=self._usuario_operador(),
+                origen="kubo.chat.autoasignacion",
+            )
+            if not ok:
+                return False, ""
+
+            try:
+                import ws_server as _ws
+                _ws.broadcast_global(
+                    _ws.EVENTO_TICKET_ACTUALIZADO,
+                    {"id_ticket": id_ticket, "estado": "En Proceso"},
+                )
+            except Exception:
+                pass
+
+            return True, nombre_tecnico
+        except Exception:
+            return False, ""
+
+    def _reset_chat_detalle_contexto(self) -> None:
+        self._chat_detalle_activo = False
+        self._chat_detalle_ticket_id = None
+        self._chat_detalle_list_ref = None
+        self._chat_detalle_txt_ref = None
+        self._chat_detalle_mensajes = []
+
+    def _manejar_chat_realtime(self, payload: Dict[str, Any]) -> None:
+        mensaje_chat = payload.get("mensaje_chat", {}) or {}
+        if not isinstance(mensaje_chat, dict):
+            return
+
+        id_ticket = str(mensaje_chat.get("id_ticket", "") or "").strip()
+        if not id_ticket:
+            return
+
+        autor_tipo = str(mensaje_chat.get("autor_tipo", "usuario") or "usuario").strip().lower()
+        autor_id = str(mensaje_chat.get("autor_id", "")).strip()
+        es_mio = autor_id.lower() == (self._usuario_operador() or "").lower()
+        modo_respuesta = self._modo_respuesta_auto()
+
+        dialogo_abierto = bool(getattr(getattr(self.page, "dialog", None), "open", False))
+        chat_abierto = bool(self._chat_detalle_activo and dialogo_abierto and self._chat_detalle_ticket_id == id_ticket)
+        notif_habilitadas = bool(self._prefs.get("ui", {}).get("mostrar_notificaciones", True))
+        notif_externa_habilitada = bool(self._prefs.get("features", {}).get("chat_notificacion_externa", True))
+
+        if autor_tipo == "usuario":
+            primer_mensaje_usuario = self._chat_es_primer_mensaje_usuario(id_ticket, mensaje_chat)
+            asignado_auto, nombre_tecnico = self._autoasignar_por_chat_si_corresponde(id_ticket)
+            responder_auto = self._chat_auto_respuesta_habilitada() and (
+                modo_respuesta == "siempre" or (modo_respuesta == "primer_mensaje" and primer_mensaje_usuario)
+            )
+            if asignado_auto and responder_auto:
+                ticket_actual = self.gestor.obtener_ticket_por_id(id_ticket) or {"ID_TICKET": id_ticket}
+                texto_auto = self._chat_mensaje_auto(ticket_actual, nombre_tecnico=nombre_tecnico)
+                self._enviar_chat_y_broadcast(
+                    id_ticket,
+                    texto_auto,
+                    autor_tipo="tecnico",
+                    autor_id=self._usuario_operador(),
+                    evitar_duplicado=True,
+                )
+            elif responder_auto and not es_mio:
+                ticket_actual = self.gestor.obtener_ticket_por_id(id_ticket) or {"ID_TICKET": id_ticket}
+                if str(ticket_actual.get("ESTADO", "")) not in {"Cerrado", "Cancelado"}:
+                    texto_auto = self._chat_mensaje_auto(ticket_actual)
+                    self._enviar_chat_y_broadcast(
+                        id_ticket,
+                        texto_auto,
+                        autor_tipo="sistema",
+                        autor_id="Sistema",
+                        evitar_duplicado=True,
+                    )
+
+        if not es_mio and not chat_abierto and notif_habilitadas and notif_externa_habilitada and mostrar_notificacion_windows:
+            try:
+                mostrar_notificacion_windows(
+                    titulo=f"💬 Mensaje en Ticket {id_ticket}",
+                    mensaje=f"{autor_id or 'Usuario'}: {str(mensaje_chat.get('mensaje', ''))[:80]}",
+                    tipo="advertencia" if autor_tipo == "usuario" else "info",
+                    duracion=self._duracion_notificacion(),
+                    abrir_app=bool(self._prefs_bool("features", "abrir_chat_notificacion", True)),
+                )
+            except Exception:
+                pass
+
+        if chat_abierto:
+            self._chat_detalle_actualizar(self.ticket_seleccionado or {"ID_TICKET": id_ticket},
+                                          mensaje_nuevo=mensaje_chat)
+        self._actualizar_badges_navegacion()
     
     # =========================================================================
     # FUNCIONES AUXILIARES
@@ -5422,11 +7110,12 @@ class PanelAdminIT:
     def _mostrar_detalle_ticket(self, ticket: Dict):
         """Muestra el panel de detalle de un ticket (solo para tickets activos)."""
         self.ticket_seleccionado = ticket
+        id_ticket = str(ticket.get("ID_TICKET", "") or "").strip()
         
         estado = ticket.get("ESTADO", "Abierto")
         
-        # Si el ticket está cerrado, mostrar vista de solo lectura
-        if estado == "Cerrado":
+        # Si el ticket está cerrado o cancelado, mostrar vista de solo lectura
+        if estado in {"Cerrado", "Cancelado"}:
             self._mostrar_detalle_historial(ticket)
             return
         
@@ -5470,6 +7159,23 @@ class PanelAdminIT:
             focused_border_color=COLOR_PRIMARIO,
             prefix_icon=icons.NOTES
         )
+
+        chat_list = ListView(height=190, spacing=6, auto_scroll=True)
+        txt_chat = TextField(
+            label="Mensaje al usuario",
+            hint_text="Escribe una actualización para el usuario...",
+            multiline=True,
+            min_lines=2,
+            max_lines=4,
+            width=380,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            prefix_icon=icons.FORUM,
+        )
+        self._chat_detalle_ticket_id = id_ticket
+        self._chat_detalle_list_ref = chat_list
+        self._chat_detalle_txt_ref = txt_chat
+        self._chat_detalle_activo = True
         
         dialogo = None
         
@@ -5477,6 +7183,7 @@ class PanelAdminIT:
             nonlocal dialogo
             if dialogo:
                 dialogo.open = False
+                self._reset_chat_detalle_contexto()
                 self.page.update()
         
         def guardar_cambios(e):
@@ -5516,6 +7223,8 @@ class PanelAdminIT:
                     id_ticket,
                     estado=estado_nuevo,
                     notas_resolucion=notas,
+                    usuario_op=self._usuario_operador(),
+                    origen="kubo.detalle",
                 )
                 
                 # Broadcast WebSocket — notifíca a la emisora del cambio
@@ -5535,6 +7244,61 @@ class PanelAdminIT:
             except ValueError as ex:
                 self._ocultar_carga()
                 self._mostrar_error("Error al actualizar", str(ex))
+
+        def refrescar_chat(e=None):
+            try:
+                self._chat_detalle_actualizar(ticket, chat_list=chat_list, recargar=True)
+            except Exception:
+                pass
+
+        def enviar_chat(e):
+            if ticket.get("ESTADO") in {"Cerrado", "Cancelado"}:
+                self._mostrar_advertencia("Este ticket ya no permite escribir porque está cerrado o cancelado.")
+                return
+
+            mensaje = (txt_chat.value or "").strip()
+            if not mensaje:
+                return
+            if not id_ticket:
+                self._mostrar_advertencia("No se encontró ID de ticket")
+                return
+            try:
+                msg = self.gestor.agregar_mensaje_chat_ticket(
+                    id_ticket=id_ticket,
+                    autor_tipo="tecnico",
+                    autor_id=self._usuario_operador(),
+                    mensaje=mensaje,
+                )
+                if not msg:
+                    self._mostrar_error("Chat", "No se pudo guardar el mensaje")
+                    return
+
+                # Mostrar notificación de mensaje enviado
+                try:
+                    contenido = mensaje[:50]
+                    if mostrar_notificacion_windows:
+                        mostrar_notificacion_windows(
+                            titulo="💬 Mensaje Enviado",
+                            mensaje=f"Respuesta enviada al usuario",
+                            tipo="exito",
+                            duracion="short",
+                            abrir_app=False
+                        )
+                except Exception:
+                    pass
+
+                try:
+                    import ws_server as _ws
+                    payload = {"mensaje_chat": msg}
+                    _ws.broadcast_global(_ws.EVENTO_TICKET_CHAT_MENSAJE, payload)
+                except Exception:
+                    pass
+
+                txt_chat.value = ""
+                self._chat_detalle_actualizar(ticket, chat_list=chat_list, mensaje_nuevo=msg)
+                self._actualizar_badges_navegacion()
+            except Exception as ex:
+                self._mostrar_error("Chat", str(ex))
         
         dialogo = AlertDialog(
             modal=True,
@@ -5609,6 +7373,32 @@ class PanelAdminIT:
                         padding=12,
                         border_radius=10
                     ),
+
+                    Container(
+                        content=Column([
+                            Row([
+                                Icon(icons.FORUM, size=16, color=COLOR_ACENTO),
+                                Text("Chat del Ticket", weight=FontWeight.BOLD, color=COLOR_ACENTO),
+                                Container(expand=True),
+                                ft.TextButton("Refrescar", icon=icons.REFRESH, on_click=refrescar_chat),
+                            ], spacing=8),
+                            chat_list,
+                            txt_chat,
+                            Row([
+                                Container(expand=True),
+                                ft.Button(
+                                    "Enviar mensaje",
+                                    icon=icons.SEND,
+                                    bgcolor=COLOR_PRIMARIO,
+                                    color=colors.WHITE,
+                                    on_click=enviar_chat,
+                                ),
+                            ]),
+                        ], spacing=8),
+                        bgcolor=COLOR_SUPERFICIE_2,
+                        padding=12,
+                        border_radius=10,
+                    ),
                     
                     Divider(color=COLOR_BORDE),
                     
@@ -5647,6 +7437,8 @@ class PanelAdminIT:
             ],
             actions_alignment=MainAxisAlignment.END
         )
+
+        refrescar_chat()
         
         self.page.show_dialog(dialogo)
     
@@ -5654,18 +7446,31 @@ class PanelAdminIT:
         """Construye la lista de entradas del log de un ticket."""
         try:
             entradas = self.gestor.obtener_log_ticket(id_ticket)
+            integridad = self.gestor.verificar_integridad_log_ticket(id_ticket)
             if not entradas:
                 return Container(
                     content=Text("Sin cambios registrados.", size=11, color=COLOR_TEXTO_SEC,
                                  italic=True),
                     padding=ft.Padding.symmetric(vertical=6)
                 )
+            estado_ok = bool(integridad.get("ok", False))
+            txt_integridad = (
+                f"Integridad: {'OK' if estado_ok else 'ALERTA'}"
+                f" | Verificados: {integridad.get('verificados', 0)}/{integridad.get('total', 0)}"
+                f" | Legacy: {integridad.get('legacy', 0)}"
+            )
             items = []
             for entrada in entradas[:15]:  # máx 15 entradas
                 fecha = str(entrada.get("FECHA", ""))[:16]
                 accion  = entrada.get("ACCION", "")
                 detalle = entrada.get("DETALLE", "")
                 op      = entrada.get("USUARIO_OP", "Sistema")
+                origen = entrada.get("ORIGEN", "") or "sistema"
+                estado_antes = entrada.get("ESTADO_ANTES", "") or ""
+                estado_despues = entrada.get("ESTADO_DESPUES", "") or ""
+                traza_estado = ""
+                if estado_antes or estado_despues:
+                    traza_estado = f"{estado_antes or '-'} -> {estado_despues or '-'}"
                 items.append(Container(
                     content=Row([
                         Icon(icons.CIRCLE, size=8, color=COLOR_ACENTO),
@@ -5673,7 +7478,9 @@ class PanelAdminIT:
                             Row([
                                 Text(accion, size=11, weight=FontWeight.BOLD, color=COLOR_TEXTO),
                                 Text(f"• {op}", size=10, color=COLOR_TEXTO_SEC),
+                                Text(f"• {origen}", size=10, color=COLOR_INFO),
                             ], spacing=6),
+                            Text(f"Estado: {traza_estado}", size=10, color=COLOR_ADVERTENCIA) if traza_estado else Container(),
                             Text(detalle, size=10, color=COLOR_TEXTO_SEC) if detalle else Container(),
                         ], spacing=1, expand=True),
                         Text(fecha, size=9, color=COLOR_TEXTO_SEC)
@@ -5681,7 +7488,19 @@ class PanelAdminIT:
                     border=ft.Border(bottom=ft.BorderSide(1, COLOR_SUPERFICIE_2)),
                     padding=ft.Padding.symmetric(vertical=5)
                 ))
-            return Column(items, spacing=0)
+            return Column([
+                Container(
+                    content=Row([
+                        Icon(icons.VERIFIED_USER if estado_ok else icons.WARNING_AMBER_ROUNDED,
+                             size=14, color=COLOR_EXITO if estado_ok else COLOR_ADVERTENCIA),
+                        Text(txt_integridad, size=10, color=COLOR_EXITO if estado_ok else COLOR_ADVERTENCIA),
+                    ], spacing=8),
+                    bgcolor=COLOR_SUPERFICIE_2,
+                    border_radius=ft.BorderRadius.all(8),
+                    padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+                ),
+                Column(items, spacing=0),
+            ], spacing=8)
         except Exception as ex:
             print(f"[LOG TICKET] {ex}")
             return Container()
@@ -5703,6 +7522,7 @@ class PanelAdminIT:
         vistas = self._builders_vistas()
         if self.vista_actual < len(vistas):
             self.contenido.content = self._obtener_vista(self.vista_actual, forzar=True)
+            self._actualizar_badges_navegacion()
             self.page.update()
     
     def _mostrar_snackbar(self, mensaje: str, color: str):
@@ -5991,8 +7811,11 @@ class PanelAdminIT:
     def _iniciar_auto_refresh(self):
         """Inicia el auto-refresh en segundo plano."""
         def refresh_loop():
-            while self.auto_refresh:
-                time.sleep(30)  # Refrescar cada 30 segundos
+            while True:
+                if not self.auto_refresh:
+                    time.sleep(5)
+                    continue
+                time.sleep(self._intervalo_auto_refresh_segundos())
                 try:
                     if self.vista_actual != 7:
                         self._refrescar_vista()
@@ -6080,7 +7903,6 @@ class PanelAdminIT:
                                 bgcolor=color_prioridad,
                                 duration=8000,
                                 action="Ver Tickets",
-                                action_color=colors.WHITE,
                                 on_action=lambda e: app_self._ir_a_tickets()
                             )
                             app_self.page.overlay.append(snack)
@@ -6123,12 +7945,20 @@ class PanelAdminIT:
                         print(f"[NOTIFICACION] Error actualizando UI: {e}")
                 except Exception as e:
                     print(f"[NOTIFICACION] Error: {e}")
+
+            def on_chat_mensaje(payload):
+                """Actualiza el chat abierto cuando llega un mensaje nuevo."""
+                try:
+                    self._manejar_chat_realtime(payload)
+                except Exception as e:
+                    print(f"[CHAT] Error actualizando chat en vivo: {e}")
             
             # Iniciar servidor en segundo plano con callbacks de solicitudes y tickets
             if iniciar_servidor(
                 puerto=self.servidor_puerto, 
                 callback_solicitud=on_nueva_solicitud,
-                callback_ticket=on_nuevo_ticket
+                callback_ticket=on_nuevo_ticket,
+                callback_chat_mensaje=on_chat_mensaje,
             ):
                 print(f"[SERVIDOR] Servidor de tickets iniciado en {self.servidor_ip}:{self.servidor_puerto}")
                 # Guardar configuración
@@ -6139,20 +7969,43 @@ class PanelAdminIT:
             print(f"[SERVIDOR] Error: {e}")
     
     def _actualizar_badge_solicitudes(self):
-        """Actualiza el badge de notificaciones en la navegación."""
+        """Compatibilidad: redirige al actualizador integral de badges."""
+        self._actualizar_badges_navegacion()
+
+    def _actualizar_badges_navegacion(self):
+        """Actualiza contadores en el menú lateral: tickets, cola, solicitudes y chats."""
         try:
+            if not hasattr(self, "nav_rail") or not self.nav_rail:
+                return
+
+            badges_habilitados = bool(self._prefs.get("features", {}).get("menu_badges", True))
+            if not badges_habilitados:
+                self.nav_rail.destinations[2].label = "Tickets"
+                self.nav_rail.destinations[4].label = "Cola"
+                self.nav_rail.destinations[9].label = "Solicitudes"
+                self.nav_rail.destinations[3].label = "Chats"
+                try:
+                    self.page.update()
+                except Exception:
+                    pass
+                return
+
             from servidor_red import obtener_solicitudes_pendientes
+
+            tickets_activos = len(self.gestor.obtener_tickets_activos())
+            tickets_cola = len(self.gestor.obtener_tickets_en_cola())
+            chats_pendientes = int(self.gestor.contar_chats_pendientes_tecnico(limite=500) or 0)
             solicitudes = obtener_solicitudes_pendientes()
-            
-            # Actualizar el label de la navegación si hay solicitudes pendientes
-            if hasattr(self, 'nav_rail') and self.nav_rail:
-                # La posición 8 es "Solicitudes"
-                destino = self.nav_rail.destinations[8]
-                if len(solicitudes) > 0:
-                    destino.label = f"Solicitudes ({len(solicitudes)})"
-                else:
-                    destino.label = "Solicitudes"
+
+            self.nav_rail.destinations[2].label = f"Tickets ({tickets_activos})" if tickets_activos > 0 else "Tickets"
+            self.nav_rail.destinations[4].label = f"Cola ({tickets_cola})" if tickets_cola > 0 else "Cola"
+            self.nav_rail.destinations[9].label = f"Solicitudes ({len(solicitudes)})" if len(solicitudes) > 0 else "Solicitudes"
+            self.nav_rail.destinations[3].label = f"Chats ({chats_pendientes})" if chats_pendientes > 0 else "Chats"
+
+            try:
                 self.page.update()
+            except Exception:
+                pass
         except Exception as e:
             print(f"[BADGE] Error actualizando: {e}")
     
@@ -6203,7 +8056,8 @@ class PanelAdminIT:
         
         # Búsqueda
         self.busqueda_inventario = ft.TextField(
-            label="🔍 Buscar equipo...",
+            label="Buscar equipo...",
+            prefix_icon=icons.SEARCH,
             width=300,
             on_change=self._filtrar_inventario,
             border_color=COLOR_ACENTO,
@@ -6241,16 +8095,14 @@ class PanelAdminIT:
             visible=False,
         )
 
-        vista = Column(
+        contenido_vista = Column(
             controls=[
-                # Título
-                Row([
-                    Icon(icons.DEVICES, size=28, color=COLOR_ACENTO),
-                    Text("Equipos Registrados", size=24, weight=FontWeight.BOLD, color=COLOR_TEXTO),
-                ], spacing=10),
-                Text("📋 Gestiona todos los equipos de tu empresa: nombre, grupo, ubicación, modelo y más", 
-                     size=12, color=COLOR_TEXTO_SEC),
-                Container(height=15),
+                self._crear_encabezado_seccion(
+                    "🖥️",
+                    "Inventario de Equipos",
+                    "Gestiona nombre, grupo, ubicación, modelo y estado de cada equipo"
+                ),
+                Container(height=10),
                 
                 # KPIs de inventario
                 Row([
@@ -6259,8 +8111,8 @@ class PanelAdminIT:
                     self._kpi_card("De Baja", str(stats.get("bajas", 0)), icons.BLOCK, COLOR_ERROR, ""),
                     self._kpi_card("Sin Nombre", str(stats["sin_nombre"]), icons.WARNING, COLOR_ADVERTENCIA, "Pendientes"),
                     self._kpi_card("En Mantenimiento", str(stats["equipos_mantenimiento"]), icons.BUILD, COLOR_PRIMARIO, ""),
-                ], wrap=True),
-                Container(height=20),
+                ], wrap=True, spacing=12, run_spacing=12, alignment=MainAxisAlignment.START),
+                Container(height=14),
 
                 Text("🧩 Secciones por Estado", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
                 Container(height=10),
@@ -6269,31 +8121,41 @@ class PanelAdminIT:
                     self._estado_chip_inventario("En mantenimiento", estados_conteo.get("En Mantenimiento", 0), icons.BUILD, COLOR_ADVERTENCIA),
                     self._estado_chip_inventario("De baja", estados_conteo.get("Baja", 0), icons.BLOCK, COLOR_ERROR),
                     self._estado_chip_inventario("Inactivos", estados_conteo.get("Inactivo", 0), icons.POWER_SETTINGS_NEW, COLOR_TEXTO_SEC),
-                ], wrap=True, spacing=10),
-                Container(height=20),
+                ], wrap=True, spacing=10, run_spacing=10, alignment=MainAxisAlignment.START),
+                Container(height=14),
                 
                 # Filtros y búsqueda
-                Row([
-                    self.filtro_grupo_inventario,
-                    self.filtro_estado_inventario,
-                    self.busqueda_inventario,
-                    Container(expand=True),
-                    ft.Button(
-                        "➕ Agregar Equipo Manual",
-                        icon=icons.ADD,
-                        on_click=self._dialogo_agregar_equipo,
-                        bgcolor=COLOR_PRIMARIO,
-                        color=colors.WHITE
+                Card(
+                    content=Container(
+                        content=Column([
+                            Row([
+                                self.filtro_grupo_inventario,
+                                self.filtro_estado_inventario,
+                                self.busqueda_inventario,
+                            ], wrap=True, spacing=10, run_spacing=10, vertical_alignment=CrossAxisAlignment.CENTER),
+                            Container(height=8),
+                            Row([
+                                ft.Button(
+                                    "Agregar Equipo Manual",
+                                    icon=icons.ADD,
+                                    on_click=self._dialogo_agregar_equipo,
+                                    bgcolor=COLOR_PRIMARIO,
+                                    color=colors.WHITE
+                                ),
+                                ft.Button(
+                                    "Refrescar",
+                                    icon=icons.REFRESH,
+                                    on_click=lambda e: self._refrescar_inventario(),
+                                    bgcolor=COLOR_SUPERFICIE_2,
+                                    color=colors.WHITE
+                                )
+                            ], wrap=True, spacing=10, run_spacing=10, alignment=MainAxisAlignment.START),
+                        ], spacing=0),
+                        padding=12,
                     ),
-                    ft.Button(
-                        "🔄 Refrescar",
-                        icon=icons.REFRESH,
-                        on_click=lambda e: self._refrescar_inventario(),
-                        bgcolor=COLOR_SUPERFICIE_2,
-                        color=colors.WHITE
-                    )
-                ]),
-                Container(height=15),
+                    elevation=2,
+                ),
+                Container(height=14),
                 
                 # Estadísticas por grupo (tarjetas)
                 Text("📊 Equipos por Grupo", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
@@ -6302,13 +8164,13 @@ class PanelAdminIT:
                     self._grupo_chip(grupo, cantidad) 
                     for grupo, cantidad in sorted(grupos_conteo.items(), key=lambda x: -x[1])
                     if cantidad > 0
-                ], wrap=True, spacing=10),
-                Container(height=20),
+                ], wrap=True, spacing=10, run_spacing=10, alignment=MainAxisAlignment.START),
+                Container(height=14),
 
                 Text("🗂️ Control por Grupo y Estado", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
                 Container(height=10),
                 self._panel_control_grupo_estado(equipos_base),
-                Container(height=20),
+                Container(height=14),
                 
                 # Tabla de equipos con scroll
                 Text("📋 Lista de Equipos", size=16, weight=FontWeight.BOLD, color=COLOR_TEXTO_SEC),
@@ -6319,11 +8181,19 @@ class PanelAdminIT:
                 Container(height=8),
                 self._inventario_paginacion,
             ],
-            scroll=ScrollMode.AUTO,
-            expand=True
+            spacing=0,
         )
         self._cargar_inventario_async()
-        return vista
+        return Column(
+            controls=[
+                Container(
+                    content=contenido_vista,
+                    padding=ft.Padding.symmetric(horizontal=2, vertical=0),
+                )
+            ],
+            scroll=ScrollMode.AUTO,
+            expand=True,
+        )
 
     def _estado_chip_inventario(self, titulo: str, cantidad: int, icono, color: str) -> Container:
         """Tarjeta compacta para separar equipos por estado."""
@@ -6337,7 +8207,7 @@ class PanelAdminIT:
                     padding=ft.Padding.symmetric(horizontal=8, vertical=2),
                     border_radius=10,
                 ),
-            ], spacing=8),
+            ], spacing=8, tight=True),
             padding=ft.Padding.symmetric(horizontal=12, vertical=8),
             bgcolor=color,
             border_radius=20,
@@ -6401,12 +8271,34 @@ class PanelAdminIT:
             column_spacing=24,
         )
 
+        ancho_inventario = max(
+            1100,
+            int(getattr(self.page, "window_width", 0) or getattr(self.page, "width", 0) or 0) - 24,
+        )
+
         return Container(
-            content=Row([tabla], scroll=ScrollMode.AUTO),
+            content=Column(
+                controls=[
+                    Container(
+                        content=Row(
+                            controls=[Container(content=tabla, width=ancho_inventario)],
+                            scroll=ScrollMode.AUTO,
+                            expand=True,
+                            vertical_alignment=CrossAxisAlignment.START,
+                        ),
+                        width=ancho_inventario,
+                        expand=True,
+                    )
+                ],
+                scroll=ScrollMode.AUTO,
+                expand=True,
+                horizontal_alignment=CrossAxisAlignment.STRETCH,
+            ),
             padding=10,
             bgcolor=COLOR_SUPERFICIE,
             border_radius=10,
             border=ft.Border.all(1, COLOR_SUPERFICIE_2),
+            expand=True,
         )
     
     def _grupo_chip(self, grupo: str, cantidad: int) -> Container:
@@ -6430,7 +8322,7 @@ class PanelAdminIT:
             content=Row([
                 Icon(icons.FOLDER, size=16, color=colors.WHITE),
                 Text(f"{grupo}: {cantidad}", size=12, color=colors.WHITE, weight=FontWeight.BOLD)
-            ], spacing=5),
+            ], spacing=5, tight=True),
             padding=ft.Padding.symmetric(horizontal=12, vertical=6),
             bgcolor=color,
             border_radius=20,
@@ -6571,9 +8463,27 @@ class PanelAdminIT:
         slice_df = df.iloc[inicio:fin]
 
         tabla = self._construir_tabla_equipos(slice_df)
+        ancho_inventario = max(
+            1100,
+            int(getattr(self.page, "window_width", 0) or getattr(self.page, "width", 0) or 0) - 24,
+        )
+
         self._inventario_tabla_container.content = Column(
-            controls=[Row(controls=[tabla], scroll=ScrollMode.AUTO)],
+            controls=[
+                Container(
+                    content=Row(
+                        controls=[Container(content=tabla, width=ancho_inventario)],
+                        scroll=ScrollMode.AUTO,
+                        expand=True,
+                        vertical_alignment=CrossAxisAlignment.START,
+                    ),
+                    width=ancho_inventario,
+                    expand=True,
+                )
+            ],
             scroll=ScrollMode.AUTO,
+            expand=True,
+            horizontal_alignment=CrossAxisAlignment.STRETCH,
         )
 
         if self._inventario_btn_prev:
@@ -7130,7 +9040,7 @@ class PanelAdminIT:
                 content=Column([
                     Container(
                         content=Icon(icons.WARNING_AMBER_ROUNDED, size=50, color=COLOR_ADVERTENCIA),
-                        alignment=ft.Alignment.CENTER
+                        alignment=ft.Alignment(0, 0)
                     ),
                     Container(height=10),
                     Text("¿Eliminar este equipo del inventario?", color=COLOR_TEXTO, text_align=TextAlign.CENTER),
@@ -7139,7 +9049,7 @@ class PanelAdminIT:
                         bgcolor=COLOR_SUPERFICIE_2,
                         padding=10,
                         border_radius=8,
-                        alignment=ft.Alignment.CENTER
+                        alignment=ft.Alignment(0, 0)
                     ),
                     Row([
                         Icon(icons.INFO_OUTLINE, size=14, color=COLOR_ERROR_CLARO),
@@ -7753,19 +9663,37 @@ class PanelAdminIT:
         try:
             self.escaner.descartar_cambios_ip(mac)
             self._mostrar_snackbar(f"✅ Alerta descartada para {mac}", COLOR_EXITO)
-            # Refrescar solo el panel de alertas
-            try:
-                equipos_red = self.escaner.obtener_equipos_red()
-                alertas_nueva = self._construir_alertas_cambios(equipos_red)
-                cambios_count = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
-                self._escaner_alertas.content = alertas_nueva if cambios_count > 0 else Container()
-                self._escaner_label_cambios.value = str(cambios_count)
-                self._escaner_label_cambios.color = COLOR_ADVERTENCIA if cambios_count else COLOR_TEXTO_SEC
-                self.page.update()
-            except Exception as ex:
-                print(f"[ERROR] Refrescando alertas: {ex}")
+            self._refrescar_panel_alertas_ip()
         except Exception as ex:
             self._mostrar_snackbar(f"❌ Error: {ex}", COLOR_ERROR)
+
+    def _descartar_todas_alertas_cambio_ip(self, e=None):
+        """Descarta en bloque todas las alertas de cambio de IP."""
+        try:
+            total_descartadas = int(self.escaner.descartar_todos_cambios_ip())
+            if total_descartadas <= 0:
+                self._mostrar_snackbar("ℹ️ No hay alertas de cambio de IP para eliminar.", COLOR_INFO)
+            else:
+                self._mostrar_snackbar(
+                    f"✅ Se eliminaron {total_descartadas} advertencias de cambio de IP.",
+                    COLOR_EXITO,
+                )
+            self._refrescar_panel_alertas_ip()
+        except Exception as ex:
+            self._mostrar_snackbar(f"❌ Error eliminando advertencias: {ex}", COLOR_ERROR)
+
+    def _refrescar_panel_alertas_ip(self):
+        """Refresca el bloque de alertas de cambios de IP y el contador asociado."""
+        try:
+            equipos_red = self.escaner.obtener_equipos_red()
+            alertas_nueva = self._construir_alertas_cambios(equipos_red)
+            cambios_count = len(equipos_red[equipos_red["CAMBIOS_IP"] > 0]) if not equipos_red.empty and "CAMBIOS_IP" in equipos_red.columns else 0
+            self._escaner_alertas.content = alertas_nueva if cambios_count > 0 else Container()
+            self._escaner_label_cambios.value = str(cambios_count)
+            self._escaner_label_cambios.color = COLOR_ADVERTENCIA if cambios_count else COLOR_TEXTO_SEC
+            self.page.update()
+        except Exception as ex:
+            print(f"[ERROR] Refrescando alertas: {ex}")
 
     def _construir_alertas_cambios(self, equipos_red: pd.DataFrame) -> Container:
         """Construye el panel de alertas de cambios de IP (descartables)."""
@@ -7820,6 +9748,17 @@ class PanelAdminIT:
                     Icon(icons.WARNING_AMBER, color=COLOR_ADVERTENCIA, size=18),
                     Text(f"Alertas de Cambios de IP ({len(alertas)})",
                          weight=FontWeight.BOLD, color=COLOR_ADVERTENCIA),
+                    Container(expand=True),
+                    ft.TextButton(
+                        "Eliminar todas",
+                        icon=icons.DELETE_SWEEP_ROUNDED,
+                        style=ft.ButtonStyle(color=COLOR_ADVERTENCIA),
+                        on_click=lambda e: self._mostrar_confirmacion(
+                            titulo="Eliminar advertencias",
+                            mensaje="¿Deseas eliminar todas las advertencias de cambios de IP?",
+                            on_confirmar=self._descartar_todas_alertas_cambio_ip,
+                        ),
+                    ),
                 ], spacing=8),
                 Container(height=6),
                 *alertas
@@ -8308,7 +10247,7 @@ class PanelAdminIT:
                         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER, spacing=2),
                         bgcolor=COLOR_ERROR if intentos >= 3 else COLOR_ADVERTENCIA,
                         padding=14, border_radius=12, width=60,
-    alignment=ft.Alignment.CENTER
+    alignment=ft.Alignment(0, 0)
                     ),
 
                     # Datos del equipo

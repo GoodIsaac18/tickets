@@ -15,6 +15,8 @@ from flet import (
 from pathlib import Path
 import asyncio
 import sys
+import secrets
+import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
 
@@ -43,9 +45,21 @@ from servidor_red import (
     obtener_ticket_activo_servidor,
     obtener_tickets_activos_servidor,
     obtener_historial_usuario_servidor,
+    enviar_mensaje_chat_ticket_servidor,
+    obtener_chat_ticket_servidor,
     obtener_estado_servidor,
     HEARTBEAT_INTERVAL
 )
+
+# Sistema de notificaciones de Windows
+try:
+    from notificaciones_windows import (
+        mostrar_notificacion_windows,
+        WINOTIFY_DISPONIBLE
+    )
+except Exception:
+    mostrar_notificacion_windows = None
+    WINOTIFY_DISPONIBLE = False
 
 # Validación remota de licencia/control de instalación
 try:
@@ -247,6 +261,15 @@ class AppEmisora:
         self.hay_disponible = False
         self.ticket_activo = None
         
+        # Para actualizaciones de chat en tiempo real (optimistic update)
+        self._chat_id_ticket = None
+        self._chat_mensajes = []
+        self._chat_mensajes_ids = set()
+        self._chat_container_ref = None  # Referencia al contenedor del chat para actualizar
+
+        # Configuración de historial en "Mis Tickets"
+        self._historial_page_size: int = 4
+        
         self._configurar_pagina()
         self._capturar_info_sistema()
         self._inicializar_servidor()  # Después de capturar info para tener MAC
@@ -255,7 +278,7 @@ class AppEmisora:
     
     def _configurar_pagina(self) -> None:
         """Configura la ventana principal."""
-        self.page.title = "🎫 Kubito - Crear Ticket de Soporte"
+        self.page.title = "Kubito - Crear Ticket de Soporte"
         self.page.window.width = 500
         self.page.window.height = 720
         self.page.window.resizable = False
@@ -263,11 +286,13 @@ class AppEmisora:
         self.page.padding = 0
         self.page.theme_mode = ft.ThemeMode.LIGHT
         
-        # Establecer icono de la ventana
-        from pathlib import Path
-        icono_path = PROJECT_ROOT / "icons" / "emisora.png"
-        if icono_path.exists():
-            self.page.window.icon = str(icono_path)
+        # Windows usa mejor .ico para el icono de barra; .png queda como respaldo.
+        icono_ico = PROJECT_ROOT / "icons" / "kubito.ico"
+        icono_png = PROJECT_ROOT / "icons" / "kubito.png"
+        if icono_ico.exists():
+            self.page.window.icon = str(icono_ico)
+        elif icono_png.exists():
+            self.page.window.icon = str(icono_png)
     
     def _capturar_info_sistema(self) -> None:
         """Captura automática de información del equipo."""
@@ -648,7 +673,6 @@ class AppEmisora:
         Cuando llega un evento ticket_creado / ticket_cancelado / ticket_actualizado,
         fuerza un refresco del panel de tickets.
         """
-        import threading
         import json as _json
         import time as _time
 
@@ -660,13 +684,18 @@ class AppEmisora:
             return
 
         self._ws_listener_activo = True
+        if not hasattr(self, "_ws_ui_refresh_lock"):
+            self._ws_ui_refresh_lock = threading.Lock()
 
         EVENTOS_REFRESCO = {
-            "ticket_creado", "ticket_actualizado", "ticket_cancelado"
+            "ticket_creado", "ticket_actualizado", "ticket_cancelado", "ticket_chat_mensaje"
         }
 
         def _refrescar_ui_desde_ws():
             """Ejecuta un refresco visual (mismo código que el auto-refresco)."""
+            # Evita refrescos en paralelo que pueden duplicar el panel visual.
+            if not self._ws_ui_refresh_lock.acquire(blocking=False):
+                return
             try:
                 if not self.servidor_conectado or not self.enlazado or not self.servidor_ip:
                     return
@@ -702,6 +731,11 @@ class AppEmisora:
                 self.page.update()
             except Exception as _e:
                 print(f"[WS-CLIENTE] Error actualizando UI: {_e}")
+            finally:
+                try:
+                    self._ws_ui_refresh_lock.release()
+                except Exception:
+                    pass
 
         async def _ws_loop():
             uri = f"ws://{self.servidor_ip}:5556"
@@ -723,12 +757,37 @@ class AppEmisora:
                             try:
                                 msg = _json.loads(raw)
                                 evento = msg.get("evento", "")
-                                if evento in EVENTOS_REFRESCO:
+                                if evento == "ticket_chat_mensaje":
+                                    print(f"[WS-CLIENTE] Evento de chat recibido — actualizando solo el chat")
+                                    msg_data = msg.get("mensaje_chat", {}) or {}
+                                    id_ticket_evento = str(msg_data.get("id_ticket", self._chat_id_ticket or "")).strip()
+                                    autor_id = str(msg_data.get("autor_id", "")).strip()
+                                    es_mio = autor_id.lower() == (self.usuario_ad or "").lower()
+
+                                    if id_ticket_evento:
+                                        chat_abierto = self._chat_id_ticket == id_ticket_evento
+
+                                        if not es_mio and not chat_abierto:
+                                            try:
+                                                contenido = str(msg_data.get("mensaje", ""))[:80]
+                                                if mostrar_notificacion_windows:
+                                                    mostrar_notificacion_windows(
+                                                        titulo=f"💬 Mensaje en Ticket {id_ticket_evento}",
+                                                        mensaje=f"{autor_id or 'IT'}: {contenido}",
+                                                        tipo="info",
+                                                        duracion="short",
+                                                        abrir_app=False,
+                                                    )
+                                            except Exception:
+                                                pass
+
+                                        if chat_abierto:
+                                            self._chat_id_ticket = id_ticket_evento
+                                            self._actualizar_chat_ui(id_ticket_evento, mensaje_chat=msg_data)
+                                elif evento in EVENTOS_REFRESCO:
+                                    # Para otros eventos (ticket_creado, etc), refrescar todo
                                     print(f"[WS-CLIENTE] Evento recibido: {evento} — refrescando UI")
-                                    threading.Thread(
-                                        target=_refrescar_ui_desde_ws,
-                                        daemon=True, name="WS-UIRefresh"
-                                    ).start()
+                                    _refrescar_ui_desde_ws()
                             except Exception:
                                 pass
 
@@ -1887,6 +1946,120 @@ class AppEmisora:
         
         return Container(content=self._tickets_content)
     
+    def _chat_mensaje_clave(self, mensaje: Dict[str, Any]) -> str:
+        return str(mensaje.get("client_msg_id") or mensaje.get("id") or "")
+
+    def _chat_upsert_mensaje_local(self, mensaje: Dict[str, Any]) -> bool:
+        """Inserta o reemplaza un mensaje en la cache local del chat."""
+        if not isinstance(mensaje, dict):
+            return False
+
+        clave = self._chat_mensaje_clave(mensaje)
+        if clave:
+            for indice, actual in enumerate(self._chat_mensajes):
+                if self._chat_mensaje_clave(actual) == clave:
+                    self._chat_mensajes[indice] = mensaje
+                    return False
+
+        self._chat_mensajes.append(mensaje)
+        return True
+
+    def _render_chat_rows(self, mensajes_chat: list[Dict[str, Any]]) -> list[Container]:
+        filas = []
+        for m in mensajes_chat[-8:]:
+            autor_tipo = str(m.get("autor_tipo", "usuario"))
+            autor_id = str(m.get("autor_id", ""))
+            mensaje = str(m.get("mensaje", ""))
+            fecha_m = str(m.get("fecha", ""))[:16]
+            es_mio = autor_id.lower() == (self.usuario_ad or "").lower()
+            color_chip = "#E0F2FE" if es_mio else "#F1F5F9"
+            color_texto = COLOR_PRIMARIO if es_mio else COLOR_TEXTO
+            etiqueta = "Tú" if es_mio else ("IT" if autor_tipo == "tecnico" else autor_id or "Usuario")
+            filas.append(
+                Container(
+                    content=Column([
+                        Row([
+                            Text(etiqueta, size=10, weight=FontWeight.W_600, color=color_texto),
+                            Text(fecha_m, size=9, color=COLOR_TEXTO_SEC),
+                        ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                        Text(mensaje, size=11, color=COLOR_TEXTO),
+                    ], spacing=2),
+                    bgcolor=color_chip,
+                    border_radius=ft.BorderRadius.all(8),
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+                )
+            )
+        if not filas:
+            filas = [
+                Container(
+                    content=Text("Sin mensajes todavía. Puedes escribir al equipo IT.", 
+                               size=11, color=COLOR_TEXTO_SEC),
+                    bgcolor="#F8FAFC",
+                    border=ft.Border.all(1, COLOR_BORDE),
+                    border_radius=ft.BorderRadius.all(8),
+                    padding=ft.Padding.all(8),
+                )
+            ]
+        return filas
+
+    def _actualizar_chat_ui(self, id_ticket: str, mensaje_chat: Optional[Dict[str, Any]] = None,
+                            recargar: bool = False) -> None:
+        """Actualiza SOLO el chat sin reconstruir todo el panel.
+        Carga los mensajes del servidor y actualiza el contenedor del chat."""
+        if not self._chat_container_ref:
+            return
+        
+        try:
+            if mensaje_chat:
+                self._chat_upsert_mensaje_local(mensaje_chat)
+
+            if recargar or not self._chat_mensajes or self._chat_id_ticket != id_ticket:
+                mensajes_chat = []
+                if self.servidor_conectado and self.servidor_ip and self.enlazado:
+                    res_chat = obtener_chat_ticket_servidor(
+                        self.servidor_ip,
+                        self.servidor_puerto,
+                        id_ticket=id_ticket,
+                        limite=30,
+                        offset=0,
+                    )
+                    if res_chat.get("success"):
+                        mensajes_chat = res_chat.get("mensajes", []) or []
+                    else:
+                        # Fallback local cuando la consulta remota falle.
+                        mensajes_chat = self.gestor.obtener_chat_ticket(id_ticket, limite=30, offset=0) or []
+                else:
+                    mensajes_chat = self.gestor.obtener_chat_ticket(id_ticket, limite=30, offset=0) or []
+
+                if mensaje_chat:
+                    clave_local = self._chat_mensaje_clave(mensaje_chat)
+                    if clave_local:
+                        reemplazado = False
+                        for indice, actual in enumerate(mensajes_chat):
+                            if self._chat_mensaje_clave(actual) == clave_local:
+                                mensajes_chat[indice] = mensaje_chat
+                                reemplazado = True
+                                break
+                        if not reemplazado:
+                            mensajes_chat.append(mensaje_chat)
+                self._chat_mensajes = mensajes_chat
+
+            self._chat_id_ticket = id_ticket
+
+            chat_rows = self._render_chat_rows(self._chat_mensajes)
+
+            # Actualizar el contenedor del chat (Column con los mensajes)
+            if self._chat_container_ref and hasattr(self._chat_container_ref, 'content'):
+                if isinstance(self._chat_container_ref.content, Column):
+                    self._chat_container_ref.content.controls.clear()
+                    self._chat_container_ref.content.controls.extend(chat_rows)
+                    try:
+                        self.page.update()
+                    except:
+                        pass
+        except Exception as e:
+            print(f"[CHAT] Error actualizando chat: {e}")
+    
     def _build_panel_ticket_activo(self, ticket: dict) -> Container:
         """Construye el panel visual del ticket activo con acciones."""
         estado = ticket.get("ESTADO", "Abierto")
@@ -1924,6 +2097,168 @@ class AppEmisora:
                     fecha_str = str(fecha_ticket)[:16]
             except:
                 fecha_str = "Hoy"
+
+        # Cargar historial de chat reciente del ticket
+        chat_editable = estado not in {"Cerrado", "Cancelado"}
+        mensajes_chat = []
+        if self.servidor_conectado and self.servidor_ip and self.enlazado and id_ticket and id_ticket != "-":
+            try:
+                res_chat = obtener_chat_ticket_servidor(
+                    self.servidor_ip,
+                    self.servidor_puerto,
+                    id_ticket=id_ticket,
+                    limite=30,
+                    offset=0,
+                )
+                if res_chat.get("success"):
+                    mensajes_chat = res_chat.get("mensajes", []) or []
+            except Exception:
+                mensajes_chat = []
+        elif id_ticket and id_ticket != "-":
+            try:
+                mensajes_chat = self.gestor.obtener_chat_ticket(id_ticket, limite=30, offset=0) or []
+            except Exception:
+                mensajes_chat = []
+
+        txt_chat = TextField(
+            hint_text="Escribe un mensaje para IT...",
+            multiline=True,
+            min_lines=1,
+            max_lines=3,
+            border_color=COLOR_BORDE,
+            focused_border_color=COLOR_PRIMARIO,
+            dense=True,
+            expand=True,
+            disabled=not chat_editable,
+        )
+
+        chat_rows = []
+        for m in mensajes_chat[-8:]:
+            autor_tipo = str(m.get("autor_tipo", "usuario"))
+            autor_id = str(m.get("autor_id", ""))
+            mensaje = str(m.get("mensaje", ""))
+            fecha_m = str(m.get("fecha", ""))[:16]
+            es_mio = autor_id.lower() == (self.usuario_ad or "").lower()
+            color_chip = "#E0F2FE" if es_mio else "#F1F5F9"
+            color_texto = COLOR_PRIMARIO if es_mio else COLOR_TEXTO
+            etiqueta = "Tú" if es_mio else ("IT" if autor_tipo == "tecnico" else autor_id or "Usuario")
+            chat_rows.append(
+                Container(
+                    content=Column([
+                        Row([
+                            Text(etiqueta, size=10, weight=FontWeight.W_600, color=color_texto),
+                            Text(fecha_m, size=9, color=COLOR_TEXTO_SEC),
+                        ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                        Text(mensaje, size=11, color=COLOR_TEXTO),
+                    ], spacing=2),
+                    bgcolor=color_chip,
+                    border_radius=ft.BorderRadius.all(8),
+                    padding=ft.Padding.symmetric(horizontal=8, vertical=6),
+                )
+            )
+        if not chat_rows:
+            chat_rows = [
+                Container(
+                    content=Text("Sin mensajes todavía. Puedes escribir al equipo IT.", size=11, color=COLOR_TEXTO_SEC),
+                    bgcolor="#F8FAFC",
+                    border=ft.Border.all(1, COLOR_BORDE),
+                    border_radius=ft.BorderRadius.all(8),
+                    padding=ft.Padding.all(8),
+                )
+            ]
+
+        def _enviar_chat(e):
+            if not chat_editable:
+                self._mostrar_advertencia("Este ticket ya no permite escribir porque está cerrado o cancelado.")
+                return
+
+            mensaje = (txt_chat.value or "").strip()
+            if not mensaje:
+                return
+            enviar_por_red = bool(self.servidor_conectado and self.servidor_ip and self.enlazado)
+
+            # OPTIMISTIC UPDATE: Agregar el mensaje localmente sin esperar al servidor
+            ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            client_msg_id = secrets.token_hex(8)
+            mensaje_local = {
+                "id": f"temp-{client_msg_id}",  # ID temporal, será reemplazado por el servidor
+                "client_msg_id": client_msg_id,
+                "id_ticket": id_ticket,
+                "fecha": ahora,
+                "autor_tipo": "usuario",
+                "autor_id": self.usuario_ad,
+                "mensaje": mensaje,
+            }
+            
+            # Agregar o reemplazar el mensaje a la lista local
+            self._chat_upsert_mensaje_local(mensaje_local)
+            self._chat_id_ticket = id_ticket
+            
+            # Limpiar campo de texto INMEDIATAMENTE
+            txt_chat.value = ""
+            try:
+                self.page.update()
+            except:
+                pass
+            
+            # Actualizar el UI del chat sin reconstruir todo el panel
+            self._actualizar_chat_ui(id_ticket, mensaje_chat=mensaje_local)
+
+            if not enviar_por_red:
+                # Modo local: persistir en DB para no perder el mensaje.
+                try:
+                    msg_local_db = self.gestor.agregar_mensaje_chat_ticket(
+                        id_ticket=id_ticket,
+                        autor_tipo="usuario",
+                        autor_id=self.usuario_ad,
+                        mensaje=mensaje,
+                    )
+                    if msg_local_db:
+                        self._actualizar_chat_ui(id_ticket, mensaje_chat=msg_local_db)
+                    self._mostrar_info("Mensaje guardado en modo local. Se sincronizará al reconectar.", "Chat sin conexión")
+                except Exception as ex:
+                    self._mostrar_error("Error de chat", f"No se pudo guardar en local: {ex}")
+                return
+            
+            # Enviar el mensaje al servidor de forma asincrónica (sin bloquear)
+            def _send_async():
+                try:
+                    resultado = enviar_mensaje_chat_ticket_servidor(
+                        self.servidor_ip,
+                        self.servidor_puerto,
+                        id_ticket=id_ticket,
+                        mensaje=mensaje,
+                        autor_id=self.usuario_ad,
+                        autor_tipo="usuario",
+                        client_msg_id=client_msg_id,
+                    )
+                    if resultado.get("success"):
+                        # El servidor responde — sincroniza solo el mensaje afectado
+                        mensaje_servidor = resultado.get("mensaje_chat") or {}
+                        if isinstance(mensaje_servidor, dict):
+                            mensaje_servidor.setdefault("client_msg_id", client_msg_id)
+                            self._actualizar_chat_ui(id_ticket, mensaje_chat=mensaje_servidor)
+                    else:
+                        # Error: mostrar notificación pero el mensaje se mantiene localmente
+                        self._mostrar_error("Error de chat", resultado.get("error", "No se pudo enviar mensaje"))
+                except Exception as ex:
+                    self._mostrar_error("Error de chat", str(ex))
+
+            import threading as _th
+            _th.Thread(target=_send_async, daemon=True).start()
+        
+        # Crear el contenedor del chat y almacenar referencia
+        chat_container = Container(
+            content=Column(chat_rows, spacing=6, scroll=ft.ScrollMode.AUTO),
+            bgcolor="#FFFFFF",
+            border=ft.Border.all(1, COLOR_BORDE),
+            border_radius=ft.BorderRadius.all(10),
+            padding=ft.Padding.all(8),
+            height=170,
+        )
+        self._chat_container_ref = chat_container
+        self._chat_id_ticket = id_ticket
+        self._chat_mensajes = mensajes_chat
         
         return Container(
             content=Column([
@@ -1992,6 +2327,28 @@ class AppEmisora:
                     ),
                     padding=ft.Padding.only(top=8),
                 ) if descripcion else Container(),
+
+                Container(height=12),
+
+                Row([
+                    Icon(icons.FORUM, size=15, color=COLOR_PRIMARIO),
+                    Text("Chat con IT", size=12, weight=FontWeight.W_600, color=COLOR_TEXTO),
+                ], spacing=6),
+
+                chat_container,
+
+                Row([
+                    txt_chat,
+                    Button(
+                        content=Row([
+                            Icon(icons.SEND, color=colors.WHITE, size=14),
+                            Text("Enviar", color=colors.WHITE, size=11, weight=FontWeight.W_500),
+                        ], spacing=4),
+                        bgcolor=COLOR_PRIMARIO,
+                        on_click=_enviar_chat,
+                        disabled=not chat_editable,
+                    ),
+                ], spacing=8, vertical_alignment=CrossAxisAlignment.END),
                 
                 Container(height=14),
                 
@@ -2235,65 +2592,119 @@ class AppEmisora:
     
     def _build_panel_historial(self, tickets: list) -> Container:
         """Construye el panel de historial de tickets anteriores."""
-        filas = []
-        for t in tickets[:10]:  # Máximo 10
+        tickets_historial = list(tickets[:50])
+        page_size = self._historial_page_size if self._historial_page_size > 0 else 4
+        pagina_actual = 0
+
+        color_map = {
+            "Cerrado": (COLOR_EXITO, icons.CHECK_CIRCLE),
+            "Cancelado": (COLOR_ERROR, icons.CANCEL),
+            "Abierto": (COLOR_ADVERTENCIA, icons.HOURGLASS_EMPTY),
+            "En Cola": (COLOR_INFO, icons.QUEUE),
+            "En Proceso": (COLOR_PRIMARIO, icons.ENGINEERING),
+            "En Espera": (COLOR_TEXTO_SEC, icons.PAUSE_CIRCLE),
+        }
+
+        lista_historial = ft.ListView(spacing=0, padding=0, height=190)
+        txt_paginacion = Text("", size=10, color=COLOR_TEXTO_SEC)
+        btn_prev = Button(
+            content=Row([
+                Icon(icons.CHEVRON_LEFT, size=16, color=COLOR_TEXTO_SEC),
+                Text("Anterior", size=11, color=COLOR_TEXTO_SEC),
+            ], spacing=4),
+            bgcolor="#F8FAFC",
+            height=34,
+        )
+        btn_next = Button(
+            content=Row([
+                Text("Siguiente", size=11, color=COLOR_TEXTO_SEC),
+                Icon(icons.CHEVRON_RIGHT, size=16, color=COLOR_TEXTO_SEC),
+            ], spacing=4),
+            bgcolor="#F8FAFC",
+            height=34,
+        )
+
+        def _fila_historial(t: dict, idx_global: int) -> Container:
             estado = t.get("ESTADO", "?")
             turno = t.get("TURNO", "-")
             categoria = t.get("CATEGORIA", "-")
             fecha = t.get("FECHA_APERTURA", "")
-            
-            # Formato fecha
+
             fecha_str = ""
             if fecha:
                 try:
-                    if hasattr(fecha, 'strftime'):
+                    if hasattr(fecha, "strftime"):
                         fecha_str = fecha.strftime("%d/%m/%y")
                     else:
                         fecha_str = str(fecha)[:10]
-                except:
+                except Exception:
                     fecha_str = str(fecha)[:10]
-            
-            # Color/icono por estado
-            color_map = {
-                "Cerrado": (COLOR_EXITO, icons.CHECK_CIRCLE),
-                "Cancelado": (COLOR_ERROR, icons.CANCEL),
-                "Abierto": (COLOR_ADVERTENCIA, icons.HOURGLASS_EMPTY),
-                "En Cola": (COLOR_INFO, icons.QUEUE),
-                "En Proceso": (COLOR_PRIMARIO, icons.ENGINEERING),
-                "En Espera": (COLOR_TEXTO_SEC, icons.PAUSE_CIRCLE),
-            }
+
             color_e, icono_e = color_map.get(estado, (COLOR_TEXTO_SEC, icons.CIRCLE))
-            
-            filas.append(
-                Container(
-                    content=Row([
-                        Icon(icono_e, size=16, color=color_e),
-                        Container(
-                            content=Text(f"T{turno}", size=11, weight=FontWeight.BOLD, 
-                                        color=COLOR_PRIMARIO),
-                            bgcolor="#EFF6FF",
-                            padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                            border_radius=ft.BorderRadius.all(4),
-                        ),
-                        Text(categoria, size=12, color=COLOR_TEXTO, expand=True),
-                        Text(estado, size=10, color=color_e, weight=FontWeight.W_500),
-                        Text(fecha_str, size=10, color=COLOR_TEXTO_SEC),
-                    ], spacing=8, vertical_alignment=CrossAxisAlignment.CENTER),
-                    padding=ft.Padding.symmetric(vertical=8, horizontal=6),
-                    border_radius=ft.BorderRadius.all(6),
-                    bgcolor="#FAFAFA" if tickets.index(t) % 2 == 0 else "transparent",
-                )
+
+            return Container(
+                content=Row([
+                    Icon(icono_e, size=16, color=color_e),
+                    Container(
+                        content=Text(f"T{turno}", size=11, weight=FontWeight.BOLD, color=COLOR_PRIMARIO),
+                        bgcolor="#EFF6FF",
+                        padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                        border_radius=ft.BorderRadius.all(4),
+                    ),
+                    Text(categoria, size=12, color=COLOR_TEXTO, expand=True),
+                    Text(estado, size=10, color=color_e, weight=FontWeight.W_500),
+                    Text(fecha_str, size=10, color=COLOR_TEXTO_SEC),
+                ], spacing=8, vertical_alignment=CrossAxisAlignment.CENTER),
+                padding=ft.Padding.symmetric(vertical=8, horizontal=6),
+                border_radius=ft.BorderRadius.all(6),
+                bgcolor="#FAFAFA" if idx_global % 2 == 0 else "transparent",
             )
-        
-        return Container(
+
+        def _render_pagina() -> None:
+            nonlocal pagina_actual
+            total = len(tickets_historial)
+            total_paginas = max(1, (total + page_size - 1) // page_size)
+            pagina_actual = max(0, min(pagina_actual, total_paginas - 1))
+
+            inicio = pagina_actual * page_size
+            fin = min(inicio + page_size, total)
+
+            lista_historial.controls.clear()
+            for idx_global, t in enumerate(tickets_historial[inicio:fin], start=inicio):
+                lista_historial.controls.append(_fila_historial(t, idx_global))
+
+            if total == 0:
+                txt_paginacion.value = "Sin historial"
+            else:
+                txt_paginacion.value = f"Mostrando {inicio + 1}-{fin} de {total} | Página {pagina_actual + 1}/{total_paginas}"
+
+            btn_prev.disabled = pagina_actual <= 0
+            btn_next.disabled = pagina_actual >= (total_paginas - 1)
+
+            if self.page:
+                self.page.update()
+
+        def _pagina_anterior(e):
+            nonlocal pagina_actual
+            pagina_actual -= 1
+            _render_pagina()
+
+        def _pagina_siguiente(e):
+            nonlocal pagina_actual
+            pagina_actual += 1
+            _render_pagina()
+
+        btn_prev.on_click = _pagina_anterior
+        btn_next.on_click = _pagina_siguiente
+
+        panel = Container(
             content=Column([
                 Row([
                     Icon(icons.HISTORY, size=16, color=COLOR_TEXTO_SEC),
                     Text("Historial de Tickets", size=13, weight=FontWeight.W_600, color=COLOR_TEXTO),
                     Container(expand=True),
                     Container(
-                        content=Text(f"{len(tickets)}", size=10, color=COLOR_PRIMARIO, 
-                                    weight=FontWeight.BOLD),
+                        content=Text(f"{len(tickets_historial)}", size=10, color=COLOR_PRIMARIO, weight=FontWeight.BOLD),
                         bgcolor="#EFF6FF",
                         padding=ft.Padding.symmetric(horizontal=8, vertical=3),
                         border_radius=ft.BorderRadius.all(10),
@@ -2301,14 +2712,31 @@ class AppEmisora:
                 ], spacing=8),
                 Container(height=6),
                 Divider(height=1, color=COLOR_BORDE),
-                Container(height=4),
-                *filas,
+                Container(height=6),
+                Container(
+                    content=lista_historial,
+                    bgcolor="#FFFFFF",
+                    border=ft.Border.all(1, "#EEF2F7"),
+                    border_radius=ft.BorderRadius.all(8),
+                    padding=ft.Padding.symmetric(horizontal=4, vertical=2),
+                ),
+                Container(height=8),
+                Row([
+                    btn_prev,
+                    Container(expand=True),
+                    txt_paginacion,
+                    Container(expand=True),
+                    btn_next,
+                ], vertical_alignment=CrossAxisAlignment.CENTER),
             ]),
             bgcolor=COLOR_TARJETA,
             border_radius=ft.BorderRadius.all(12),
             padding=ft.Padding.all(16),
             margin=ft.Padding.only(left=20, right=20, top=10, bottom=5),
         )
+
+        _render_pagina()
+        return panel
     
     def _refrescar_ticket(self, e):
         """Refresca el estado del ticket activo consultando al servidor.
@@ -2971,9 +3399,6 @@ class AppEmisora:
         descripcion = self.txt_descripcion.value.strip() if self.txt_descripcion.value else ""
         if not descripcion:
             return False, "Describe el problema que tienes"
-        
-        if len(descripcion) < 10:
-            return False, "La descripción debe tener al menos 10 caracteres"
 
         if InputValidator is not None:
             es_valido, error = InputValidator.validar_ticket({

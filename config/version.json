@@ -1,41 +1,40 @@
 {
-    "version": "6.0.0",
-    "fecha": "2026-04-05",
+    "version": "7.0.0",
+    "fecha": "2026-04-09",
     "critico": false,
-    "descripcion": "Version 6.0.0 estable: raiz reorganizada, Kubo/Kubito independientes, sin instalador legado y con mejoras de estabilidad/licencias",
+    "descripcion": "Version 7.0.0 estable empresarial: mejoras UX/UI, limpieza de defaults hardcodeados, fortalecimiento de seguridad y documentacion integral de despliegue",
     "cambios": [
-        "Correccion de errores de UI en busqueda global de receptora (compatibilidad Flet 0.81)",
-        "Eliminacion del bloque visual grande en busqueda y simplificacion de filtros",
-        "Correccion de errores runtime en Alignment/Container y estabilidad del boton Buscar",
-        "Mejoras importantes en sistema de licencias: validaciones, endpoints admin y control de seguridad",
-        "Hardening de red LAN: rate limiting, CORS y limites de payload",
-        "Health checks y logging JSON para monitoreo operativo",
-        "Mejoras de backup/restore y recuperacion",
-        "Ajuste de launchers para evitar RuntimeWarning por doble carga con runpy",
-        "Reorganizacion de raiz y estructura de proyecto para despliegue mas limpio",
-        "Retiro del instalador obsoleto y separacion de apps finales Kubo/Kubito",
-        "Documentacion de release y cambios para despliegue estable"
+        "Eliminacion de tecnicos hardcodeados por defecto en inicializacion de datos",
+        "Correcciones de UI en Configuracion y Gestion de Tecnicos (alineacion, acciones y iconografia)",
+        "Ajustes de validacion en emisora para reducir bloqueos innecesarios al crear tickets",
+        "Mejoras de estabilidad en receptora con correcciones de runtime para Flet 0.81",
+        "Fortalecimiento de seguridad en servicios de red, validadores y endpoints",
+        "Actualizacion de metadata de version en modulo de licencias",
+        "Consolidacion de scripts de calidad y pruebas de smoke para pipeline",
+        "Documentacion de instalacion, especificaciones, tecnologias y release notes ampliadas"
     ],
     "archivos_nuevos": [
-        "config/app.json",
-        "config/version.json",
-        "config/licencias_config.json",
-        "src/core/logger.py",
-        "src/core/backup.py",
-        "scripts/backup_database.py",
-        "tests/test_data_access.py",
-        "tests/test_license_client.py",
-        ".github/workflows/tests.yml"
+        "scripts/release_gate.ps1",
+        "scripts/run_pytest.py",
+        "src/core/startup_guard.py",
+        "tests/test_audit_enterprise.py",
+        "tests/test_entrypoint_smoke.py",
+        "tests/test_startup_guard.py",
+        "pytest.ini"
     ],
     "archivos_modificados": [
-        "src/core/servidor_red.py (health checks)",
-        "src/apps/licencias/server.py (health + logging)",
-        "src/apps/emisora/app.py (validación)",
-        "src/apps/receptora/app.py (validación)",
-        "src/core/data_access.py (logging)",
         "README.md",
-        ".gitignore (config/* excepto defaults)"
+        "src/apps/receptora/app.py",
+        "src/apps/emisora/app.py",
+        "src/apps/licencias/server.py",
+        "src/core/data_access.py",
+        "src/core/validators.py",
+        "src/core/servidor_red.py",
+        "src/core/ws_server.py",
+        "scripts/init_database.py",
+        "scripts/start_produccion_segura.ps1",
+        "requirements.txt"
     ],
-    "notas": "Release recomendado para produccion: mayor estabilidad general y mejoras sustanciales en licenciamiento",
-    "compatibilidad": "Windows 10/11, Python 3.11+"
+    "notas": "Release recomendado para produccion en LAN corporativa con mayor consistencia operativa y base de mantenimiento v7.",
+    "compatibilidad": "Windows 10/11, Python 3.11+, Flet 0.81"
 }

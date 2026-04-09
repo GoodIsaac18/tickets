@@ -70,6 +70,8 @@ MAX_CONEXIONES_ACTIVAS = 50       # Máximo conexiones simultáneas
 RATE_LIMIT_VENTANA = 60           # Ventana de tiempo en segundos
 RATE_LIMIT_MAX_PETICIONES = 120   # Máximo peticiones por IP en la ventana
 RATE_LIMIT_TICKETS_POR_MAC = 10   # Máximo tickets por MAC en 5 minutos
+RATE_LIMIT_CHAT_POR_IP = 60       # Máximo mensajes de chat por IP en la ventana
+RATE_LIMIT_CHAT_POR_TICKET = 30   # Máximo mensajes de chat por ticket en la ventana
 DEBOUNCE_ESCRITURA_MS = 500       # Milisegundos para agrupar escrituras
 
 # === ENDURECIMIENTO RED/LAN ===
@@ -103,6 +105,7 @@ _servidor_http: Optional[HTTPServer] = None
 _callback_nuevo_ticket: Optional[Callable] = None
 _callback_equipo_conectado: Optional[Callable] = None
 _callback_equipo_desconectado: Optional[Callable] = None
+_callback_chat_mensaje: Optional[Callable] = None
 
 # Equipos conectados: {mac_address: {info, ultimo_heartbeat}}
 _equipos_conectados: Dict[str, Dict] = {}
@@ -115,6 +118,8 @@ _procesador_activo = False
 # === SISTEMA DE RATE LIMITING ===
 _rate_limit_por_ip: Dict[str, List[float]] = {}  # {ip: [timestamps]}
 _rate_limit_tickets_por_mac: Dict[str, List[float]] = {}  # {mac: [timestamps]}
+_rate_limit_chat_por_ip: Dict[str, List[float]] = {}  # {ip: [timestamps]}
+_rate_limit_chat_por_ticket: Dict[str, List[float]] = {}  # {ticket: [timestamps]}
 _lock_rate_limit = threading.RLock()
 
 # === CONEXIONES ACTIVAS ===
@@ -208,6 +213,39 @@ def _verificar_rate_limit_ticket(mac: str) -> bool:
         return True
 
 
+def _verificar_rate_limit_chat(ip: str, id_ticket: str) -> bool:
+    """Verifica si una IP o ticket ha excedido el límite de mensajes de chat."""
+    with _lock_rate_limit:
+        ahora = time.time()
+        ventana = RATE_LIMIT_VENTANA
+
+        if ip in _rate_limit_chat_por_ip:
+            _rate_limit_chat_por_ip[ip] = [
+                t for t in _rate_limit_chat_por_ip[ip]
+                if ahora - t < ventana
+            ]
+        else:
+            _rate_limit_chat_por_ip[ip] = []
+
+        if id_ticket in _rate_limit_chat_por_ticket:
+            _rate_limit_chat_por_ticket[id_ticket] = [
+                t for t in _rate_limit_chat_por_ticket[id_ticket]
+                if ahora - t < ventana
+            ]
+        else:
+            _rate_limit_chat_por_ticket[id_ticket] = []
+
+        if len(_rate_limit_chat_por_ip[ip]) >= RATE_LIMIT_CHAT_POR_IP:
+            return False
+
+        if len(_rate_limit_chat_por_ticket[id_ticket]) >= RATE_LIMIT_CHAT_POR_TICKET:
+            return False
+
+        _rate_limit_chat_por_ip[ip].append(ahora)
+        _rate_limit_chat_por_ticket[id_ticket].append(ahora)
+        return True
+
+
 def _agregar_a_cola_seguro(tipo: str, datos: Any) -> bool:
     """
     Agrega un mensaje a la cola de forma segura (no bloqueante).
@@ -221,6 +259,15 @@ def _agregar_a_cola_seguro(tipo: str, datos: Any) -> bool:
     except queue.Full:
         print(f"[WARNING] Cola de mensajes llena, descartando mensaje tipo: {tipo}")
         return False
+
+
+def _disparar_callback_chat(datos: Dict[str, Any]) -> None:
+    """Dispara el callback interno de chat, si está configurado."""
+    if _callback_chat_mensaje:
+        try:
+            _callback_chat_mensaje(datos)
+        except Exception as exc:
+            print(f"[WS] Error en callback de chat: {exc}")
 
 
 def _origen_permitido(origen: str) -> bool:
@@ -498,6 +545,10 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             self._enviar_recordatorio_ticket(datos)
         elif self.path == "/ticket/cancelar":
             self._cancelar_ticket(datos)
+        elif self.path == "/ticket/chat/enviar":
+            self._enviar_mensaje_chat_ticket(datos)
+        elif self.path == "/ticket/chat/historial":
+            self._obtener_chat_ticket(datos)
         elif self.path == "/ticket/historial_usuario":
             self._consultar_historial_usuario(datos)
         else:
@@ -561,31 +612,14 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             # ===== NOTIFICACIÓN DE WINDOWS (en thread separado para no bloquear) =====
             def enviar_notificacion():
                 try:
-                    from winotify import Notification, audio
-                    
-                    turno = ticket.get("TURNO", "N/A")
-                    categoria = ticket.get("CATEGORIA", "General")
-                    usuario = ticket.get("USUARIO_AD", "")
-                    prioridad = ticket.get("PRIORIDAD", "Media")
-                    
-                    # Evitar spam de notificaciones y overhead: solo altas/críticas
-                    if prioridad not in ["Crítica", "Alta"]:
-                        return
-                    
-                    notif = Notification(
-                        app_id="Soporte Técnico",
-                        title=f"Nuevo Ticket - Turno {turno}",
-                        msg=f"Usuario: {usuario}\nCategoría: {categoria}\nPrioridad: {prioridad}",
-                        duration="long"
-                    )
-                    
-                    if prioridad in ["Crítica", "Alta"]:
-                        notif.set_audio(audio.Reminder, loop=False)
+                    if NOTIFICACIONES_DISPONIBLES:
+                        _notif_ticket(ticket)
                     else:
-                        notif.set_audio(audio.Default, loop=False)
-                    
-                    notif.show()
-                    # Sin logs por ticket para reducir I/O
+                        turno = ticket.get("TURNO", "N/A")
+                        categoria = ticket.get("CATEGORIA", "General")
+                        usuario = ticket.get("USUARIO_AD", "")
+                        prioridad = ticket.get("PRIORIDAD", "Media")
+                        print(f"[NOTIF] Nuevo ticket: Turno {turno} | {usuario} | {categoria} | {prioridad}")
                 except Exception as e:
                     log_error(_logger, f"Error en notificacion ticket: {e}", exception=e)
             
@@ -917,7 +951,12 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 nuevo_historial += f": {nota}"
             nuevo_historial += f"\n{historial_actual}"
             
-            gestor.actualizar_ticket(id_ticket, historial=nuevo_historial)
+            gestor.actualizar_ticket(
+                id_ticket,
+                historial=nuevo_historial,
+                usuario_op=usuario or "Usuario",
+                origen="api.recordatorio",
+            )
             
             # Notificación de Windows (en thread separado)
             def enviar_notif():
@@ -994,7 +1033,9 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
                 id_ticket, 
                 estado="Cancelado",
                 fecha_cierre=datetime.now(),
-                historial=nuevo_historial
+                historial=nuevo_historial,
+                usuario_op=usuario or "Usuario",
+                origen="api.cancelacion",
             )
             
             # Notificación de Windows (en thread separado)
@@ -1048,6 +1089,110 @@ class TicketRequestHandler(BaseHTTPRequestHandler):
             print(f"[SERVIDOR] ERROR en cancelación: {e}")
             traceback.print_exc()
             self._enviar_json(500, {"error": str(e)})
+
+    def _enviar_mensaje_chat_ticket(self, datos: dict):
+        """Envía un mensaje al chat asociado a un ticket."""
+        try:
+            id_ticket = InputValidator.sanitize_string(str(datos.get("id_ticket", "")), max_length=64)
+            mensaje = InputValidator.sanitize_string(
+                str(datos.get("mensaje", "")),
+                max_length=2000,
+                allow_newlines=True,
+            )
+            autor_tipo = InputValidator.sanitize_string(str(datos.get("autor_tipo", "usuario")), max_length=20).lower()
+            autor_id = InputValidator.sanitize_string(
+                str(datos.get("autor_id", datos.get("usuario_ad", ""))),
+                max_length=120,
+            )
+            client_msg_id = InputValidator.sanitize_string(str(datos.get("client_msg_id", "")), max_length=80)
+
+            if not id_ticket:
+                self._enviar_json(400, {"success": False, "error": "ID de ticket requerido"})
+                return
+            if not mensaje:
+                self._enviar_json(400, {"success": False, "error": "Mensaje requerido"})
+                return
+            if len(mensaje) > 2000:
+                self._enviar_json(400, {"success": False, "error": "Mensaje demasiado largo"})
+                return
+
+            ip_cliente = self.client_address[0] if getattr(self, "client_address", None) else ""
+            if ip_cliente and not _verificar_rate_limit_chat(ip_cliente, id_ticket):
+                self._enviar_json(429, {
+                    "success": False,
+                    "error": "Ha enviado demasiados mensajes de chat. Espere unos segundos.",
+                    "retry_after": RATE_LIMIT_VENTANA,
+                })
+                return
+
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"success": False, "error": "Servicio no disponible"})
+                return
+
+            ticket = gestor.obtener_ticket_por_id(id_ticket)
+            if not ticket:
+                self._enviar_json(404, {"success": False, "error": "Ticket no encontrado"})
+                return
+
+            msg = gestor.agregar_mensaje_chat_ticket(
+                id_ticket=id_ticket,
+                autor_tipo=autor_tipo,
+                autor_id=autor_id,
+                mensaje=mensaje,
+            )
+            if not msg:
+                self._enviar_json(500, {"success": False, "error": "No se pudo registrar el mensaje"})
+                return
+
+            if client_msg_id:
+                msg["client_msg_id"] = client_msg_id
+
+            if WS_SERVER_DISPONIBLE:
+                try:
+                    payload = {"mensaje_chat": msg, "client_msg_id": client_msg_id}
+                    _ws.broadcast_global(_ws.EVENTO_TICKET_CHAT_MENSAJE, payload)
+                except Exception as _we:
+                    print(f"[WS] Error broadcast ticket_chat_mensaje: {_we}")
+
+            _disparar_callback_chat({"mensaje_chat": msg, "client_msg_id": client_msg_id})
+
+            self._enviar_json(200, {"success": True, "mensaje_chat": msg, "client_msg_id": client_msg_id})
+        except Exception as e:
+            self._enviar_json(500, {"success": False, "error": str(e)})
+
+    def _obtener_chat_ticket(self, datos: dict):
+        """Obtiene historial de chat de un ticket."""
+        try:
+            id_ticket = str(datos.get("id_ticket", "")).strip()
+            limite = int(datos.get("limite", 100) or 100)
+            offset = int(datos.get("offset", 0) or 0)
+
+            if not id_ticket:
+                self._enviar_json(400, {"success": False, "error": "ID de ticket requerido"})
+                return
+
+            gestor = _obtener_gestor_tickets()
+            if not gestor:
+                self._enviar_json(503, {"success": False, "error": "Servicio no disponible"})
+                return
+
+            ticket = gestor.obtener_ticket_por_id(id_ticket)
+            if not ticket:
+                self._enviar_json(404, {"success": False, "error": "Ticket no encontrado"})
+                return
+
+            mensajes = gestor.obtener_chat_ticket(id_ticket=id_ticket, limite=limite, offset=offset)
+            self._enviar_json(200, {
+                "success": True,
+                "id_ticket": id_ticket,
+                "mensajes": mensajes,
+                "count": len(mensajes),
+                "limite": max(1, min(limite, 500)),
+                "offset": max(0, offset),
+            })
+        except Exception as e:
+            self._enviar_json(500, {"success": False, "error": str(e)})
     
     def do_OPTIONS(self):
         self.send_response(200)
@@ -1599,7 +1744,8 @@ def iniciar_servidor(puerto: int = PUERTO_HTTP,
                      callback_ticket: Callable = None,
                      callback_equipo: Callable = None,
                      callback_desconexion: Callable = None,
-                     callback_solicitud: Callable = None) -> bool:
+                     callback_solicitud: Callable = None,
+                     callback_chat_mensaje: Callable = None) -> bool:
     """
     Inicia el servidor de tickets en segundo plano.
     
@@ -1608,7 +1754,7 @@ def iniciar_servidor(puerto: int = PUERTO_HTTP,
     """
     global _servidor_http_activo, _servidor_http
     global _callback_nuevo_ticket, _callback_equipo_conectado, _callback_equipo_desconectado
-    global _callback_nueva_solicitud
+    global _callback_nueva_solicitud, _callback_chat_mensaje
     
     if _servidor_http_activo:
         return True
@@ -1617,6 +1763,7 @@ def iniciar_servidor(puerto: int = PUERTO_HTTP,
     _callback_equipo_conectado = callback_equipo
     _callback_equipo_desconectado = callback_desconexion
     _callback_nueva_solicitud = callback_solicitud
+    _callback_chat_mensaje = callback_chat_mensaje
     
     # Cargar solicitudes y equipos aprobados
     _cargar_solicitudes()
@@ -1899,6 +2046,46 @@ def enviar_recordatorio_ticket(ip: str, puerto: int, id_ticket: str,
         return {"success": False, "error": str(e)}
 
 
+def enviar_mensaje_chat_ticket_servidor(ip: str, puerto: int, id_ticket: str,
+                                        mensaje: str, autor_id: str = "",
+                                        autor_tipo: str = "usuario",
+                                        client_msg_id: str = "") -> Dict:
+    """Envía un mensaje al chat de un ticket."""
+    try:
+        url = f"http://{ip}:{puerto}/ticket/chat/enviar"
+        payload = {
+            "id_ticket": id_ticket,
+            "mensaje": mensaje,
+            "autor_id": autor_id,
+            "autor_tipo": autor_tipo,
+        }
+        if client_msg_id:
+            payload["client_msg_id"] = client_msg_id
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers=_headers_json_cliente())
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def obtener_chat_ticket_servidor(ip: str, puerto: int, id_ticket: str,
+                                 limite: int = 100, offset: int = 0) -> Dict:
+    """Obtiene el chat de un ticket desde el servidor."""
+    try:
+        url = f"http://{ip}:{puerto}/ticket/chat/historial"
+        data = json.dumps({
+            "id_ticket": id_ticket,
+            "limite": limite,
+            "offset": offset,
+        }).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers=_headers_json_cliente())
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        return {"success": False, "error": str(e), "mensajes": []}
+
+
 def obtener_tickets_activos_servidor(ip: str, puerto: int, usuario_ad: str, mac_address: str = "") -> Dict:
     """Obtiene TODOS los tickets activos de un usuario/MAC desde el servidor."""
     try:
@@ -2110,6 +2297,34 @@ class ClienteServidor:
                 "descripcion": descripcion,
                 "prioridad": prioridad
             }
+        )
+
+    def enviar_mensaje_chat_ticket(self, id_ticket: str, mensaje: str,
+                                   autor_tipo: str = "usuario") -> Dict:
+        """Envía un mensaje al chat de un ticket."""
+        if not self.conectado and not self.conectar():
+            return {"success": False, "error": "Sin conexión al servidor"}
+
+        return enviar_mensaje_chat_ticket_servidor(
+            self.servidor_ip,
+            self.servidor_puerto,
+            id_ticket=id_ticket,
+            mensaje=mensaje,
+            autor_id=self.usuario_ad,
+            autor_tipo=autor_tipo,
+        )
+
+    def obtener_chat_ticket(self, id_ticket: str, limite: int = 100, offset: int = 0) -> Dict:
+        """Obtiene el historial de chat de un ticket."""
+        if not self.conectado and not self.conectar():
+            return {"success": False, "error": "Sin conexión al servidor", "mensajes": []}
+
+        return obtener_chat_ticket_servidor(
+            self.servidor_ip,
+            self.servidor_puerto,
+            id_ticket=id_ticket,
+            limite=limite,
+            offset=offset,
         )
 
 

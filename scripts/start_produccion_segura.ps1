@@ -4,7 +4,8 @@ param(
 	[string]$ServerIp = "",
 	[string]$HttpApiKey = "",
 	[string]$LicenseAdminKey = "",
-	[string]$CorsOrigins = "http://localhost:5173,http://127.0.0.1:5173"
+	[string]$CorsOrigins = "http://localhost:5173,http://127.0.0.1:5173",
+	[switch]$SkipQualityGate
 )
 
 function Get-LocalIPv4 {
@@ -29,6 +30,10 @@ if ($LicenseAdminKey.Length -lt 24) {
 	throw "Debes pasar -LicenseAdminKey con al menos 24 caracteres."
 }
 
+if ($CorsOrigins -match "\*") {
+	throw "No se permite wildcard en -CorsOrigins para producción segura."
+}
+
 # Perfil base de seguridad/produccion para servidor LAN
 $env:TICKETS_MODE = "produccion"
 $env:TICKETS_STRICT_SECURITY = "1"
@@ -47,6 +52,14 @@ $env:TICKETS_LICENSE_ADMIN_KEY = $LicenseAdminKey
 # CORS restringido
 $env:TICKETS_HTTP_CORS_ORIGINS = $CorsOrigins
 $env:TICKETS_LICENSE_CORS_ORIGINS = $CorsOrigins
+
+if (-not $SkipQualityGate) {
+	Write-Host "Ejecutando quality gate previo a producción..."
+	& "$PSScriptRoot\release_gate.ps1" -CoverageMin 85 -DataAccessCoverageMin 38 -SkipPackageSmoke
+	if ($LASTEXITCODE -ne 0) {
+		throw "Quality gate falló. No se iniciará producción."
+	}
+}
 
 # Tuning operativo
 $env:TICKETS_DISCOVERY_CACHE_TTL = "30"

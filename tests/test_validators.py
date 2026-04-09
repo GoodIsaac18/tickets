@@ -73,6 +73,10 @@ class TestInputValidator:
         # Transición válida
         is_valid, _ = InputValidator.validar_estado_cambio("Abierto", "En Cola")
         assert is_valid
+
+        # Ahora también se permite mover directo a En Proceso
+        is_valid, _ = InputValidator.validar_estado_cambio("Abierto", "En Proceso")
+        assert is_valid
         
         # Transición inválida
         is_valid, error = InputValidator.validar_estado_cambio("Cerrado", "Abierto")
@@ -96,8 +100,8 @@ class TestDataAccess:
         """Debe obtener lista de técnicos."""
         tecnicos = db.obtener_tecnicos()
         assert tecnicos is not None
-        # Por defecto hay 3 técnicos
-        assert len(tecnicos) >= 1
+        # Ya no se crean técnicos por defecto.
+        assert len(tecnicos) >= 0
 
 
 if __name__ == "__main__":

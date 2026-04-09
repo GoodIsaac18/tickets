@@ -64,6 +64,9 @@ MAX_JSON_BYTES_SUPPORT = int(os.getenv("TICKETS_LICENSE_MAX_JSON_SUPPORT", "1638
 MAX_FORM_BYTES_ADMIN = int(os.getenv("TICKETS_LICENSE_MAX_FORM_ADMIN", "16384"))
 VALIDATE_RATE_LIMIT_MAX = int(os.getenv("TICKETS_LICENSE_VALIDATE_RATE_MAX", "60"))
 VALIDATE_RATE_LIMIT_WINDOW = int(os.getenv("TICKETS_LICENSE_VALIDATE_RATE_WINDOW", "60"))
+ACTIVATION_FAIL_MAX = int(os.getenv("TICKETS_LICENSE_ACTIVATION_FAIL_MAX", "5"))
+ACTIVATION_FAIL_WINDOW = int(os.getenv("TICKETS_LICENSE_ACTIVATION_FAIL_WINDOW", "600"))
+ACTIVATION_LOCK_SECONDS = int(os.getenv("TICKETS_LICENSE_ACTIVATION_LOCK_SECONDS", "900"))
 ACTIVATION_TOKEN_TTL_SECONDS = int(os.getenv("TICKETS_LICENSE_TOKEN_TTL_SECONDS", "43200"))
 TRIAL_DURATION_SECONDS = int(os.getenv("TICKETS_LICENSE_TRIAL_SECONDS", str(7 * 24 * 60 * 60)))
 TRIAL_LICENSE_KEY = os.getenv("TICKETS_LICENSE_TRIAL_KEY", "KUBO-TRIAL-7D-GRATIS").strip().upper()
@@ -78,6 +81,9 @@ CORS_ALLOWED_ORIGINS = tuple(
 
 _validate_rate_limit_por_ip: Dict[str, List[float]] = {}
 _validate_rate_limit_lock = threading.Lock()
+_activation_failures: Dict[str, List[float]] = {}
+_activation_lock_until: Dict[str, float] = {}
+_activation_guard_lock = threading.Lock()
 
 
 class PayloadTooLargeError(ValueError):
@@ -87,14 +93,22 @@ class PayloadTooLargeError(ValueError):
 def _validar_config_seguridad_inicio() -> None:
     advertencias: List[str] = []
     errores: List[str] = []
+    modo_estricto = STRICT_SECURITY or TICKETS_MODE == "produccion"
 
     if ADMIN_KEY == "cambiar-esta-clave" or len(ADMIN_KEY) < 24:
         advertencias.append("ADMIN key débil o por defecto en servidor de licencias.")
-        if STRICT_SECURITY or TICKETS_MODE == "produccion":
+        if modo_estricto:
             errores.append("Defina TICKETS_LICENSE_ADMIN_KEY robusta (>=24 caracteres).")
 
     if not CORS_ALLOWED_ORIGINS:
         advertencias.append("TICKETS_LICENSE_CORS_ORIGINS está vacío.")
+        if modo_estricto:
+            errores.append("Defina TICKETS_LICENSE_CORS_ORIGINS en producción.")
+
+    if "*" in CORS_ALLOWED_ORIGINS:
+        advertencias.append("CORS en wildcard detectado para licencias.")
+        if modo_estricto:
+            errores.append("No se permite wildcard en TICKETS_LICENSE_CORS_ORIGINS en producción.")
 
     if HOST in {"0.0.0.0", ""}:
         advertencias.append("Licencias expuesto en todas las interfaces (HOST=0.0.0.0).")
@@ -131,6 +145,47 @@ def validate_rate_limited(client_ip: str) -> bool:
         stamps.append(now)
         _validate_rate_limit_por_ip[client_ip] = stamps
         return False
+
+
+def _activation_guard_subject(installation_id: str, client_ip: str) -> str:
+    installation_id = str(installation_id or "").strip()
+    if installation_id:
+        return f"id:{installation_id}"
+    return f"ip:{str(client_ip or '').strip() or 'unknown'}"
+
+
+def activation_is_temporarily_locked(installation_id: str, client_ip: str) -> int:
+    now = time.time()
+    subject = _activation_guard_subject(installation_id, client_ip)
+    with _activation_guard_lock:
+        locked_until = float(_activation_lock_until.get(subject, 0.0))
+        if locked_until <= now:
+            _activation_lock_until.pop(subject, None)
+            return 0
+        return max(1, int(locked_until - now))
+
+
+def register_activation_failure(installation_id: str, client_ip: str) -> int:
+    now = time.time()
+    threshold = now - max(1, ACTIVATION_FAIL_WINDOW)
+    subject = _activation_guard_subject(installation_id, client_ip)
+    with _activation_guard_lock:
+        failures = [stamp for stamp in _activation_failures.get(subject, []) if stamp >= threshold]
+        failures.append(now)
+        _activation_failures[subject] = failures
+        if len(failures) >= max(1, ACTIVATION_FAIL_MAX):
+            locked_until = now + max(5, ACTIVATION_LOCK_SECONDS)
+            _activation_lock_until[subject] = locked_until
+            _activation_failures.pop(subject, None)
+            return max(1, int(locked_until - now))
+    return 0
+
+
+def clear_activation_failures(installation_id: str, client_ip: str) -> None:
+    subject = _activation_guard_subject(installation_id, client_ip)
+    with _activation_guard_lock:
+        _activation_failures.pop(subject, None)
+        _activation_lock_until.pop(subject, None)
 
 
 def utc_now_iso() -> str:
@@ -672,8 +727,49 @@ def validate_request(payload: Dict[str, Any], client_ip: str) -> Dict[str, Any]:
             }
 
         if activation_key:
+            retry_after = activation_is_temporarily_locked(str(row["installation_id"]), client_ip)
+            if retry_after > 0:
+                if _logger:
+                    log_info(
+                        _logger,
+                        "Bloqueo temporal de activacion",
+                        installation_id=str(row["installation_id"]),
+                        ip=client_ip,
+                        retry_after_seconds=retry_after,
+                    )
+                return {
+                    "allowed": False,
+                    "reason": "activation_temporarily_locked",
+                    "message": "Demasiados intentos fallidos de activación. Espere antes de reintentar.",
+                    "retry_after_seconds": retry_after,
+                    "token": row["token"],
+                    "server_time_utc": server_time_utc,
+                    "server_ip": client_ip,
+                }
+
             ok, reason, message, meta = _activate_with_key(conn, row, product, activation_key, fingerprint)
             if not ok:
+                if reason in {"activation_key_invalid", "product_mismatch", "license_key_expired"}:
+                    locked_for = register_activation_failure(str(row["installation_id"]), client_ip)
+                    if locked_for > 0:
+                        if _logger:
+                            log_error(
+                                _logger,
+                                "Bloqueo por fuerza bruta de activacion",
+                                installation_id=str(row["installation_id"]),
+                                ip=client_ip,
+                                reason=reason,
+                                locked_for_seconds=locked_for,
+                            )
+                        return {
+                            "allowed": False,
+                            "reason": "activation_temporarily_locked",
+                            "message": "Demasiados intentos fallidos de activación. Espere antes de reintentar.",
+                            "retry_after_seconds": locked_for,
+                            "token": row["token"],
+                            "server_time_utc": server_time_utc,
+                            "server_ip": client_ip,
+                        }
                 return {
                     "allowed": False,
                     "reason": reason,
@@ -690,6 +786,8 @@ def validate_request(payload: Dict[str, Any], client_ip: str) -> Dict[str, Any]:
                 int(meta["key_id"] if meta else 0),
                 expires_at,
             )
+
+            clear_activation_failures(str(row["installation_id"]), client_ip)
 
             return {
                 "allowed": True,
@@ -846,7 +944,7 @@ def generate_manual_license(
     clean_installation_id = installation_id.strip() or f"MAN-{secrets.token_hex(8).upper()}"
     clean_empresa = empresa.strip() or "DEFAULT"
     clean_app_id = app_id.strip() or "kubito"
-    clean_version = version.strip() or "6.0.0"
+    clean_version = version.strip() or "7.0.0"
     clean_hostname = hostname.strip()
     clean_usuario = usuario.strip()
     token = secrets.token_urlsafe(24)
@@ -1264,7 +1362,7 @@ def admin_page_html(query: Dict[str, List[str]] | None = None) -> str:
                         <option value="kubito">kubito</option>
                         <option value="kubo">kubo</option>
                     </select>
-                    <input type="text" name="version" value="6.0.0" placeholder="Version"
+                    <input type="text" name="version" value="7.0.0" placeholder="Version"
                                  class="px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500" />
                     <input type="text" name="installation_id" placeholder="Installation ID (opcional)"
                                  class="px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 md:col-span-2" />
@@ -1642,7 +1740,7 @@ class Handler(BaseHTTPRequestHandler):
                         "service": "licencias",
                         "database": "ok",
                         "installations_count": install_count,
-                        "version": "6.0.0"
+                        "version": "7.0.0"
                     }
                     self._json(HTTPStatus.OK, health)
                     if _logger:
@@ -1830,7 +1928,7 @@ class Handler(BaseHTTPRequestHandler):
 
             empresa = str(form.get("empresa", "")).strip()
             app_id = str(form.get("app_id", "kubito")).strip()
-            version = str(form.get("version", "6.0.0")).strip()
+            version = str(form.get("version", "7.0.0")).strip()
             installation_id = str(form.get("installation_id", "")).strip()
             hostname = str(form.get("hostname", "")).strip()
             usuario = str(form.get("usuario", "")).strip()

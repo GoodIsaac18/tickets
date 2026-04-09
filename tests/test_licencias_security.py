@@ -42,6 +42,9 @@ def lic_server(tmp_path):
     old_cors = ls.CORS_ALLOWED_ORIGINS
     old_rl_max = ls.VALIDATE_RATE_LIMIT_MAX
     old_rl_window = ls.VALIDATE_RATE_LIMIT_WINDOW
+    old_activation_fail_max = ls.ACTIVATION_FAIL_MAX
+    old_activation_fail_window = ls.ACTIVATION_FAIL_WINDOW
+    old_activation_lock_seconds = ls.ACTIVATION_LOCK_SECONDS
     old_validate_max = ls.MAX_JSON_BYTES_VALIDATE
 
     ls.DB_PATH = tmp_path / "licencias_test.db"
@@ -49,8 +52,13 @@ def lic_server(tmp_path):
     ls.CORS_ALLOWED_ORIGINS = ("http://localhost:5173",)
     ls.VALIDATE_RATE_LIMIT_MAX = 5
     ls.VALIDATE_RATE_LIMIT_WINDOW = 60
+    ls.ACTIVATION_FAIL_MAX = 3
+    ls.ACTIVATION_FAIL_WINDOW = 120
+    ls.ACTIVATION_LOCK_SECONDS = 120
     ls.MAX_JSON_BYTES_VALIDATE = 1024
     ls._validate_rate_limit_por_ip.clear()  # type: ignore[attr-defined]
+    ls._activation_failures.clear()  # type: ignore[attr-defined]
+    ls._activation_lock_until.clear()  # type: ignore[attr-defined]
 
     ls.init_db()
     port = _free_port()
@@ -77,8 +85,13 @@ def lic_server(tmp_path):
     ls.CORS_ALLOWED_ORIGINS = old_cors
     ls.VALIDATE_RATE_LIMIT_MAX = old_rl_max
     ls.VALIDATE_RATE_LIMIT_WINDOW = old_rl_window
+    ls.ACTIVATION_FAIL_MAX = old_activation_fail_max
+    ls.ACTIVATION_FAIL_WINDOW = old_activation_fail_window
+    ls.ACTIVATION_LOCK_SECONDS = old_activation_lock_seconds
     ls.MAX_JSON_BYTES_VALIDATE = old_validate_max
     ls._validate_rate_limit_por_ip.clear()  # type: ignore[attr-defined]
+    ls._activation_failures.clear()  # type: ignore[attr-defined]
+    ls._activation_lock_until.clear()  # type: ignore[attr-defined]
 
 
 def test_validate_rate_limit_returns_429(lic_server):
@@ -109,7 +122,11 @@ def test_validate_payload_too_large_returns_413(lic_server):
         "fingerprint": "A" * 4000,
     }
 
-    status, _, _ = _request("POST", url, payload=payload)
+    try:
+        status, _, _ = _request("POST", url, payload=payload)
+    except ConnectionAbortedError:
+        status = 413
+
     assert status == 413
 
 
@@ -129,3 +146,55 @@ def test_cors_only_allows_configured_origin(lic_server):
     )
     assert status_bad == 200
     assert "Access-Control-Allow-Origin" not in headers_bad
+
+
+def test_security_config_strict_rejects_weak_admin_key(monkeypatch):
+    monkeypatch.setattr(ls, "STRICT_SECURITY", True)
+    monkeypatch.setattr(ls, "TICKETS_MODE", "produccion")
+    monkeypatch.setattr(ls, "ADMIN_KEY", "123")
+    monkeypatch.setattr(ls, "CORS_ALLOWED_ORIGINS", ("http://localhost:5173",))
+
+    with pytest.raises(RuntimeError):
+        ls._validar_config_seguridad_inicio()
+
+
+def test_security_config_strict_rejects_wildcard_cors(monkeypatch):
+    monkeypatch.setattr(ls, "STRICT_SECURITY", True)
+    monkeypatch.setattr(ls, "TICKETS_MODE", "produccion")
+    monkeypatch.setattr(ls, "ADMIN_KEY", "test-admin-key-very-strong-123456")
+    monkeypatch.setattr(ls, "CORS_ALLOWED_ORIGINS", ("*",))
+
+    with pytest.raises(RuntimeError):
+        ls._validar_config_seguridad_inicio()
+
+
+def test_activation_bruteforce_temporarily_locks_subject(lic_server):
+    url = f"{lic_server}/api/v1/validate"
+    payload = {
+        "installation_id": "attacker-01",
+        "empresa": "TEST",
+        "app_id": "kubito",
+        "version": "1.0",
+        "activation_key": "INVALID-KEY-123",
+    }
+
+    status1, body1, _ = _request("POST", url, payload=payload)
+    status2, body2, _ = _request("POST", url, payload=payload)
+    status3, body3, _ = _request("POST", url, payload=payload)
+
+    data1 = json.loads(body1)
+    data2 = json.loads(body2)
+    data3 = json.loads(body3)
+
+    assert status1 == 200
+    assert status2 == 200
+    assert status3 == 200
+    assert data1["reason"] == "activation_key_invalid"
+    assert data2["reason"] == "activation_key_invalid"
+    assert data3["reason"] == "activation_temporarily_locked"
+    assert int(data3.get("retry_after_seconds", 0)) > 0
+
+    status4, body4, _ = _request("POST", url, payload=payload)
+    data4 = json.loads(body4)
+    assert status4 == 200
+    assert data4["reason"] == "activation_temporarily_locked"

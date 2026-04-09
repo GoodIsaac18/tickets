@@ -21,3 +21,6 @@ winotify>=1.1.0
 # Servidor y cliente WebSocket (sincronización en tiempo real via push)
 # SQLite ya viene incluido con Python — sin instalación adicional
 websockets>=12.0
+
+# Cobertura de pruebas
+coverage>=7.0
